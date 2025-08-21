@@ -30,6 +30,11 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		0B2C8A3F2E5651D3002969CF /* Tennis Trainer */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Tennis Trainer";
+			sourceTree = "<group>";
+		};
 		0B2C8A4D2E5651D7002969CF /* Tennis TrainerTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Tennis TrainerTests";
@@ -38,11 +43,6 @@
 		0B2C8A572E5651D7002969CF /* Tennis TrainerUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Tennis TrainerUITests";
-			sourceTree = "<group>";
-		};
-		0B2C8A3F2E5651D3002969CF /* Tennis Trainer */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Tennis Trainer";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */

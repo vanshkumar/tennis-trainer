@@ -11,6 +11,7 @@ class CameraManager: NSObject, ObservableObject {
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
+    var poseDetectionManager: PoseDetectionManager?
     var onFrameProcessed: ((Bool) -> Void)?
     
     override init() {
@@ -172,6 +173,8 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     private func processFrame(pixelBuffer: CVPixelBuffer) {
+        poseDetectionManager?.detectPose(in: pixelBuffer)
+        
         let shouldBeep = trivialFrameCheck()
         
         DispatchQueue.main.async {

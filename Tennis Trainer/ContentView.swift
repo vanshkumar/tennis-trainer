@@ -6,10 +6,12 @@
 //
 
 import SwiftUI
+import Vision
 
 struct ContentView: View {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var audioManager = AudioManager()
+    @StateObject private var poseDetectionManager = PoseDetectionManager()
     @State private var frameCount = 0
     @State private var lastFrameTime = Date()
     @State private var fps: Double = 0
@@ -17,8 +19,25 @@ struct ContentView: View {
     var body: some View {
         ZStack {
             if cameraManager.hasPermission {
-                CameraPreview(previewLayer: cameraManager.getPreviewLayer())
-                    .ignoresSafeArea()
+                ZStack {
+                    CameraPreview(previewLayer: cameraManager.getPreviewLayer())
+                        .ignoresSafeArea()
+                    
+                    // Overlay detected joints
+                    GeometryReader { geometry in
+                        ForEach(Array(poseDetectionManager.detectedPose.keys), id: \.self) { jointName in
+                            if let point = poseDetectionManager.detectedPose[jointName] {
+                                Circle()
+                                    .fill(jointColor(for: jointName))
+                                    .frame(width: 12, height: 12)
+                                    .position(
+                                        x: point.location.x * geometry.size.width,
+                                        y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
+                                    )
+                            }
+                        }
+                    }
+                }
                 
                 VStack {
                     HStack {
@@ -36,7 +55,23 @@ struct ContentView: View {
                         .padding(8)
                         .background(Color.black.opacity(0.6))
                         .cornerRadius(8)
+                        
                         Spacer()
+                        
+                        VStack(alignment: .trailing) {
+                            Text("Forearm: \(String(format: "%.1f°", poseDetectionManager.forearmAngle))")
+                                .foregroundColor(.white)
+                                .font(.caption)
+                            Text("Upper Arm: \(String(format: "%.1f°", poseDetectionManager.upperArmAngle))")
+                                .foregroundColor(.white)
+                                .font(.caption)
+                            Text("Joints: \(poseDetectionManager.detectedPose.count)")
+                                .foregroundColor(.white)
+                                .font(.caption)
+                        }
+                        .padding(8)
+                        .background(Color.black.opacity(0.6))
+                        .cornerRadius(8)
                     }
                     .padding()
                     
@@ -85,6 +120,8 @@ struct ContentView: View {
             }
         }
         .onAppear {
+            cameraManager.poseDetectionManager = poseDetectionManager
+            
             cameraManager.onFrameProcessed = { shouldBeep in
                 frameCount += 1
                 
@@ -100,6 +137,19 @@ struct ContentView: View {
                     audioManager.playBeep()
                 }
             }
+        }
+    }
+    
+    func jointColor(for jointName: VNHumanBodyPoseObservation.JointName) -> Color {
+        switch jointName {
+        case .rightShoulder, .leftShoulder:
+            return .red
+        case .rightElbow, .leftElbow:
+            return .green
+        case .rightWrist, .leftWrist:
+            return .blue
+        default:
+            return .yellow
         }
     }
 }
