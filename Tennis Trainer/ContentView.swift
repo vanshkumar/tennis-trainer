@@ -8,15 +8,78 @@
 import SwiftUI
 import Vision
 
+enum AppMode: String, CaseIterable {
+    case liveCamera = "Live Camera"
+    case videoPlayback = "Video Playback"
+}
+
 struct ContentView: View {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var audioManager = AudioManager()
     @StateObject private var poseDetectionManager = PoseDetectionManager()
+    @StateObject private var videoPlayerManager = VideoPlayerManager()
     @State private var frameCount = 0
     @State private var lastFrameTime = Date()
     @State private var fps: Double = 0
     
+    @State private var currentMode: AppMode = .liveCamera
+    @State private var selectedVideoURL: URL?
+    @State private var showingVideoPicker = false
+    
     var body: some View {
+        VStack {
+            // Mode picker at the top
+            Picker("Mode", selection: $currentMode) {
+                ForEach(AppMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .padding()
+            .onChange(of: currentMode) { _, newMode in
+                handleModeChange(to: newMode)
+            }
+            
+            // Content based on current mode
+            ZStack {
+                switch currentMode {
+                case .liveCamera:
+                    liveCameraView
+                case .videoPlayback:
+                    videoPlaybackView
+                }
+            }
+        }
+        .onAppear {
+            cameraManager.poseDetectionManager = poseDetectionManager
+            
+            cameraManager.onFrameProcessed = { shouldBeep in
+                frameCount += 1
+                
+                let now = Date()
+                let timeDiff = now.timeIntervalSince(lastFrameTime)
+                if timeDiff >= 1.0 {
+                    fps = Double(frameCount) / timeDiff
+                    frameCount = 0
+                    lastFrameTime = now
+                }
+                
+                if shouldBeep {
+                    audioManager.playBeep()
+                }
+            }
+        }
+        .onChange(of: selectedVideoURL) { _, newURL in
+            if let url = newURL {
+                videoPlayerManager.loadVideo(from: url)
+            }
+        }
+        .sheet(isPresented: $showingVideoPicker) {
+            VideoPickerView(selectedVideoURL: $selectedVideoURL)
+        }
+    }
+    
+    private var liveCameraView: some View {
         ZStack {
             if cameraManager.hasPermission {
                 ZStack {
@@ -119,25 +182,133 @@ struct ContentView: View {
                 }
             }
         }
-        .onAppear {
-            cameraManager.poseDetectionManager = poseDetectionManager
-            
-            cameraManager.onFrameProcessed = { shouldBeep in
-                frameCount += 1
-                
-                let now = Date()
-                let timeDiff = now.timeIntervalSince(lastFrameTime)
-                if timeDiff >= 1.0 {
-                    fps = Double(frameCount) / timeDiff
-                    frameCount = 0
-                    lastFrameTime = now
+    }
+    
+    private var videoPlaybackView: some View {
+        ZStack {
+            if videoPlayerManager.isLoading {
+                // Loading state
+                VStack {
+                    ProgressView("Loading video...")
+                        .font(.title2)
+                        .padding()
+                    Spacer()
                 }
+            } else if let _ = selectedVideoURL,
+                      let playerLayer = videoPlayerManager.getPlayerLayer() {
                 
-                if shouldBeep {
-                    audioManager.playBeep()
+                // Video player with controls
+                VStack(spacing: 0) {
+                    // Video display area
+                    VideoPlayerView(playerLayer: playerLayer)
+                        .aspectRatio(16/9, contentMode: .fit)
+                        .background(Color.black)
+                    
+                    // Video controls
+                    VStack(spacing: 8) {
+                        // Time slider
+                        if videoPlayerManager.duration > 0 {
+                            HStack {
+                                Text(formatTime(videoPlayerManager.currentTime))
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                                    .monospaced()
+                                
+                                Slider(value: Binding(
+                                    get: { videoPlayerManager.currentTime },
+                                    set: { videoPlayerManager.seek(to: $0) }
+                                ), in: 0...videoPlayerManager.duration)
+                                .accentColor(.white)
+                                
+                                Text(formatTime(videoPlayerManager.duration))
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                                    .monospaced()
+                            }
+                            .padding(.horizontal)
+                        }
+                        
+                        // Play/pause and other controls
+                        HStack(spacing: 20) {
+                            Button(videoPlayerManager.isPlaying ? "Pause" : "Play") {
+                                if videoPlayerManager.isPlaying {
+                                    videoPlayerManager.pause()
+                                } else {
+                                    // Refresh connection before playing
+                                    videoPlayerManager.refreshPlayerLayerConnection()
+                                    videoPlayerManager.play()
+                                }
+                            }
+                            .padding()
+                            .background(videoPlayerManager.isPlaying ? Color.orange : Color.green)
+                            .foregroundColor(.white)
+                            .clipShape(Circle())
+                            
+                            Button("Choose New Video") {
+                                videoPlayerManager.pause()
+                                showingVideoPicker = true
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 12)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .padding()
+                    }
+                    .background(Color.black.opacity(0.8))
+                }
+            } else {
+                // No video selected - show picker
+                VStack {
+                    Text("Video Playback Mode")
+                        .font(.title2)
+                        .padding()
+                    
+                    Text("Select a video from your camera roll")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .padding()
+                    
+                    Button("Choose Video from Library") {
+                        showingVideoPicker = true
+                    }
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(8)
+                    
+                    Spacer()
                 }
             }
         }
+    }
+    
+    private func handleModeChange(to newMode: AppMode) {
+        switch newMode {
+        case .liveCamera:
+            // Stop video player and start camera
+            videoPlayerManager.pause()
+            if cameraManager.hasPermission && !cameraManager.isRecording {
+                cameraManager.startCapture()
+            }
+        case .videoPlayback:
+            // Stop camera recording when switching to video mode
+            if cameraManager.isRecording {
+                cameraManager.stopCapture()
+                // Reset frame count and fps when stopping
+                frameCount = 0
+                fps = 0
+            }
+            // Refresh video player connection after mode switch
+            videoPlayerManager.refreshPlayerLayerConnection()
+        }
+    }
+    
+    private func formatTime(_ seconds: Double) -> String {
+        let minutes = Int(seconds) / 60
+        let seconds = Int(seconds) % 60
+        return String(format: "%d:%02d", minutes, seconds)
     }
     
     func jointColor(for jointName: VNHumanBodyPoseObservation.JointName) -> Color {
