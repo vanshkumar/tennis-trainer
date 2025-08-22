@@ -14,6 +14,9 @@ class CameraManager: NSObject, ObservableObject {
     var poseDetectionManager: PoseDetectionManager?
     var onFrameProcessed: ((Bool) -> Void)?
     
+    private var wasHorizontal = false
+    private var lastBeepTime: Date = Date.distantPast
+    
     override init() {
         super.init()
         checkPermissions()
@@ -175,18 +178,34 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func processFrame(pixelBuffer: CVPixelBuffer) {
         poseDetectionManager?.detectPose(in: pixelBuffer)
         
-        let shouldBeep = trivialFrameCheck()
+        let shouldBeep = checkForearmHorizontal()
         
         DispatchQueue.main.async {
             self.onFrameProcessed?(shouldBeep)
         }
     }
     
-    private func trivialFrameCheck() -> Bool {
-        let shouldBeep = Int.random(in: 1...60) == 1
+    private func checkForearmHorizontal() -> Bool {
+        guard let poseManager = poseDetectionManager else { return false }
+        
+        let forearmAngle = poseManager.forearmAngle
+        let threshold = 10.0 // degrees tolerance
+        let cooldownSeconds = 1.0 // minimum time between beeps
+        
+        // Check if forearm is horizontal (0° or 180° ± threshold)
+        let isHorizontalRight = abs(forearmAngle - 0) <= threshold
+        let isHorizontalLeft = abs(forearmAngle - 180) <= threshold
+        let isCurrentlyHorizontal = isHorizontalRight || isHorizontalLeft
+        
+        // Only beep on transition TO horizontal AND respect cooldown
+        let shouldBeep = isCurrentlyHorizontal && !wasHorizontal && 
+                        Date().timeIntervalSince(lastBeepTime) > cooldownSeconds
+        
         if shouldBeep {
-            print("Frame processed - triggering beep")
+            lastBeepTime = Date()
         }
+        
+        wasHorizontal = isCurrentlyHorizontal
         return shouldBeep
     }
 }
