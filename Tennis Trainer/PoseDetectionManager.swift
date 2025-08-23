@@ -14,9 +14,9 @@ class PoseDetectionManager: ObservableObject {
         poseRequest.revision = VNDetectHumanBodyPoseRequestRevision1
     }
     
-    func detectPose(in pixelBuffer: CVPixelBuffer) {
-        // Use .right orientation for camera feed from back camera
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: .right, options: [:])
+    func detectPose(in pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation = .right) {
+        // Use provided orientation (default .right for camera, but videos should pass correct orientation)
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
         
         do {
             try handler.perform([poseRequest])

@@ -52,6 +52,7 @@ struct ContentView: View {
         }
         .onAppear {
             cameraManager.poseDetectionManager = poseDetectionManager
+            videoPlayerManager.poseDetectionManager = poseDetectionManager
             
             cameraManager.onFrameProcessed = { shouldBeep in
                 frameCount += 1
@@ -64,6 +65,12 @@ struct ContentView: View {
                     lastFrameTime = now
                 }
                 
+                if shouldBeep {
+                    audioManager.playBeep()
+                }
+            }
+            
+            videoPlayerManager.onFrameProcessed = { shouldBeep in
                 if shouldBeep {
                     audioManager.playBeep()
                 }
@@ -86,13 +93,17 @@ struct ContentView: View {
                     CameraPreview(previewLayer: cameraManager.getPreviewLayer())
                         .ignoresSafeArea()
                     
-                    // Overlay detected joints
+                    // Right arm joint overlays
                     GeometryReader { geometry in
-                        ForEach(Array(poseDetectionManager.detectedPose.keys), id: \.self) { jointName in
+                        let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = [
+                            .rightShoulder, .rightElbow, .rightWrist
+                        ]
+                        
+                        ForEach(rightArmJoints, id: \.self) { jointName in
                             if let point = poseDetectionManager.detectedPose[jointName] {
                                 Circle()
                                     .fill(jointColor(for: jointName))
-                                    .frame(width: 12, height: 12)
+                                    .frame(width: 6, height: 6)
                                     .position(
                                         x: point.location.x * geometry.size.width,
                                         y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
@@ -199,10 +210,32 @@ struct ContentView: View {
                 
                 // Video player with controls
                 VStack(spacing: 0) {
-                    // Video display area
-                    VideoPlayerView(playerLayer: playerLayer)
+                    // Video display area with joint overlays
+                    ZStack {
+                        VideoPlayerView(playerLayer: playerLayer)
+                            .aspectRatio(16/9, contentMode: .fit)
+                            .background(Color.black)
+                        
+                        // Right arm joint overlays for video
+                        GeometryReader { geometry in
+                            let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = [
+                                .rightShoulder, .rightElbow, .rightWrist
+                            ]
+                            
+                            ForEach(rightArmJoints, id: \.self) { jointName in
+                                if let point = poseDetectionManager.detectedPose[jointName] {
+                                    Circle()
+                                        .fill(jointColor(for: jointName))
+                                        .frame(width: 6, height: 6)
+                                        .position(
+                                            x: point.location.x * geometry.size.width,
+                                            y: (1 - point.location.y) * geometry.size.height
+                                        )
+                                }
+                            }
+                        }
                         .aspectRatio(16/9, contentMode: .fit)
-                        .background(Color.black)
+                    }
                     
                     // Video controls
                     VStack(spacing: 8) {
@@ -215,9 +248,11 @@ struct ContentView: View {
                                     .monospaced()
                                 
                                 Slider(value: Binding(
-                                    get: { videoPlayerManager.currentTime },
-                                    set: { videoPlayerManager.seek(to: $0) }
-                                ), in: 0...videoPlayerManager.duration)
+                                    get: { max(0, videoPlayerManager.currentTime) },
+                                    set: { newTime in
+                                        videoPlayerManager.seek(to: max(0, newTime))
+                                    }
+                                ), in: 0...max(videoPlayerManager.duration, 1))
                                 .accentColor(.white)
                                 
                                 Text(formatTime(videoPlayerManager.duration))
@@ -310,6 +345,7 @@ struct ContentView: View {
         let seconds = Int(seconds) % 60
         return String(format: "%d:%02d", minutes, seconds)
     }
+    
     
     func jointColor(for jointName: VNHumanBodyPoseObservation.JointName) -> Color {
         switch jointName {
