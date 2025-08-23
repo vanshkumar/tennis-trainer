@@ -71,6 +71,16 @@ struct ContentView: View {
             }
             
             videoPlayerManager.onFrameProcessed = { shouldBeep in
+                frameCount += 1
+                
+                let now = Date()
+                let timeDiff = now.timeIntervalSince(lastFrameTime)
+                if timeDiff >= 1.0 {
+                    fps = Double(frameCount) / timeDiff
+                    frameCount = 0
+                    lastFrameTime = now
+                }
+                
                 if shouldBeep {
                     audioManager.playBeep()
                 }
@@ -239,6 +249,37 @@ struct ContentView: View {
                     
                     // Video controls
                     VStack(spacing: 8) {
+                        // FPS and info display
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Video FPS: \(String(format: "%.1f", fps))")
+                                    .foregroundColor(.white)
+                                    .font(.caption)
+                                    .monospaced()
+                                Text("Joints: \(poseDetectionManager.detectedPose.count)")
+                                    .foregroundColor(.white)
+                                    .font(.caption)
+                            }
+                            .padding(8)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(8)
+                            
+                            Spacer()
+                            
+                            VStack(alignment: .trailing) {
+                                Text("Forearm: \(String(format: "%.1f°", poseDetectionManager.forearmAngle))")
+                                    .foregroundColor(.white)
+                                    .font(.caption)
+                                Text("Upper Arm: \(String(format: "%.1f°", poseDetectionManager.upperArmAngle))")
+                                    .foregroundColor(.white)
+                                    .font(.caption)
+                            }
+                            .padding(8)
+                            .background(Color.black.opacity(0.6))
+                            .cornerRadius(8)
+                        }
+                        .padding(.horizontal)
+                        
                         // Time slider
                         if videoPlayerManager.duration > 0 {
                             HStack {
@@ -331,10 +372,11 @@ struct ContentView: View {
             // Stop camera recording when switching to video mode
             if cameraManager.isRecording {
                 cameraManager.stopCapture()
-                // Reset frame count and fps when stopping
-                frameCount = 0
-                fps = 0
             }
+            // Reset frame count and fps when switching modes
+            frameCount = 0
+            fps = 0
+            lastFrameTime = Date()
             // Refresh video player connection after mode switch
             videoPlayerManager.refreshPlayerLayerConnection()
         }
