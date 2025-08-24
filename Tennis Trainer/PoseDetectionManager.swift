@@ -71,11 +71,11 @@ class PoseDetectionManager: ObservableObject {
             )
             self.forearmAngle = angleFromHorizontal(vector: forearmVector)
             
-            print("Shoulder: (\(String(format: "%.3f", shoulder.location.x)), \(String(format: "%.3f", shoulder.location.y))) conf: \(String(format: "%.2f", shoulder.confidence))")
-            print("Elbow: (\(String(format: "%.3f", elbow.location.x)), \(String(format: "%.3f", elbow.location.y))) conf: \(String(format: "%.2f", elbow.confidence))")
-            print("Wrist: (\(String(format: "%.3f", wrist.location.x)), \(String(format: "%.3f", wrist.location.y))) conf: \(String(format: "%.2f", wrist.confidence))")
-            print("Forearm vector: (\(String(format: "%.3f", forearmVector.x)), \(String(format: "%.3f", forearmVector.y)))")
-            print("Updated angles - Forearm: \(String(format: "%.1f", forearmAngle))°, Upper: \(String(format: "%.1f", upperArmAngle))°")
+//            print("Shoulder: (\(String(format: "%.3f", shoulder.location.x)), \(String(format: "%.3f", shoulder.location.y))) conf: \(String(format: "%.2f", shoulder.confidence))")
+//            print("Elbow: (\(String(format: "%.3f", elbow.location.x)), \(String(format: "%.3f", elbow.location.y))) conf: \(String(format: "%.2f", elbow.confidence))")
+//            print("Wrist: (\(String(format: "%.3f", wrist.location.x)), \(String(format: "%.3f", wrist.location.y))) conf: \(String(format: "%.2f", wrist.confidence))")
+//            print("Forearm vector: (\(String(format: "%.3f", forearmVector.x)), \(String(format: "%.3f", forearmVector.y)))")
+//            print("Updated angles - Forearm: \(String(format: "%.1f", forearmAngle))°, Upper: \(String(format: "%.1f", upperArmAngle))°")
         } else {
             print("Missing keypoints - Shoulder: \(detectedPose[.rightShoulder] != nil), Elbow: \(detectedPose[.rightElbow] != nil), Wrist: \(detectedPose[.rightWrist] != nil)")
         }
