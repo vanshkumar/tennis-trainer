@@ -52,7 +52,9 @@ struct ContentView: View {
         }
         .onAppear {
             cameraManager.poseDetectionManager = poseDetectionManager
+            cameraManager.setupBallDetection(with: poseDetectionManager)
             videoPlayerManager.poseDetectionManager = poseDetectionManager
+            videoPlayerManager.setupBallDetection(with: poseDetectionManager)
             
             cameraManager.onFrameProcessed = { shouldBeep in
                 frameCount += 1
@@ -119,6 +121,17 @@ struct ContentView: View {
                                         y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
                                     )
                             }
+                        }
+
+                        // Ball overlay (live camera)
+                        if let pos = cameraManager.ballDetectionManager?.ballPosition {
+                            Circle()
+                                .stroke(Color.yellow, lineWidth: 2)
+                                .frame(width: 14, height: 14)
+                                .position(
+                                    x: pos.x * geometry.size.width,
+                                    y: (1 - pos.y) * geometry.size.height
+                                )
                         }
                     }
                 }
@@ -242,6 +255,17 @@ struct ContentView: View {
                                             y: (1 - point.location.y) * geometry.size.height
                                         )
                                 }
+                            }
+
+                            // Ball overlay (video)
+                            if let pos = videoPlayerManager.ballDetectionManager?.ballPosition {
+                                Circle()
+                                    .stroke(Color.yellow, lineWidth: 2)
+                                    .frame(width: 14, height: 14)
+                                    .position(
+                                        x: pos.x * geometry.size.width,
+                                        y: (1 - pos.y) * geometry.size.height
+                                    )
                             }
                         }
                         .aspectRatio(16/9, contentMode: .fit)

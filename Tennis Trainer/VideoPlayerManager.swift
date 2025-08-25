@@ -16,6 +16,7 @@ class VideoPlayerManager: ObservableObject {
     
     // Pose detection components
     var poseDetectionManager: PoseDetectionManager?
+    var ballDetectionManager: BallDetectionManager?
     var onFrameProcessed: ((Bool) -> Void)?
     
     private let horizontalDetector = ForearmHorizontalDetector()
@@ -100,6 +101,7 @@ class VideoPlayerManager: ObservableObject {
         // Run pose detection with correct orientation for video
         let orientation = getVideoOrientation()
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
+        ballDetectionManager?.process(pixelBuffer: pixelBuffer)
         
         // Check for horizontal forearm and trigger callback
         let shouldBeep = checkForearmHorizontal()
@@ -203,6 +205,10 @@ class VideoPlayerManager: ObservableObject {
         }
         
         return playerLayer
+    }
+
+    func setupBallDetection(with pose: PoseDetectionManager) {
+        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose)
     }
     
     private func cleanup() {

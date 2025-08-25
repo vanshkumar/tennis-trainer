@@ -12,6 +12,7 @@ class CameraManager: NSObject, ObservableObject {
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
     var poseDetectionManager: PoseDetectionManager?
+    var ballDetectionManager: BallDetectionManager?
     var onFrameProcessed: ((Bool) -> Void)?
     
     private let horizontalDetector = ForearmHorizontalDetector()
@@ -176,6 +177,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     
     private func processFrame(pixelBuffer: CVPixelBuffer) {
         poseDetectionManager?.detectPose(in: pixelBuffer)
+        ballDetectionManager?.process(pixelBuffer: pixelBuffer)
         
         let shouldBeep = checkForearmHorizontal()
         
@@ -187,5 +189,12 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func checkForearmHorizontal() -> Bool {
         guard let poseManager = poseDetectionManager else { return false }
         return horizontalDetector.checkForearmHorizontal(forearmAngle: poseManager.forearmAngle)
+    }
+}
+
+// MARK: - Setup
+extension CameraManager {
+    func setupBallDetection(with pose: PoseDetectionManager) {
+        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose)
     }
 }
