@@ -95,6 +95,16 @@ class BallDetectionManager: ObservableObject {
     }
 
     func process(pixelBuffer: CVPixelBuffer) {
+        // Feature selection gate: only run this path when color+Kalman is selected.
+        guard AppConfig.ballDetectionMethod == .colorKalman else {
+            // Clear any stale state/output when disabled.
+            hasKF = false
+            missCount = 0
+            lastTime = nil
+            DispatchQueue.main.async { self.ballPosition = nil }
+            return
+        }
+
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
