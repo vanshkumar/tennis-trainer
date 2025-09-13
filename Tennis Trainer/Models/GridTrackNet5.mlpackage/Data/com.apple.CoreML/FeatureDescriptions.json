@@ -1,0 +1,36 @@
+{
+  "Inputs" : {
+    "f1" : {
+      "MLFeatureShortDescription" : "RGB frame 1 of 5 (any size; auto-resized to 432x768)."
+    },
+    "f4" : {
+      "MLFeatureShortDescription" : "RGB frame 4 of 5 (any size; auto-resized to 432x768)."
+    },
+    "f3" : {
+      "MLFeatureShortDescription" : "RGB frame 3 of 5 (any size; auto-resized to 432x768)."
+    },
+    "f2" : {
+      "MLFeatureShortDescription" : "RGB frame 2 of 5 (any size; auto-resized to 432x768)."
+    },
+    "f5" : {
+      "MLFeatureShortDescription" : "RGB frame 5 of 5 (any size; auto-resized to 432x768)."
+    }
+  },
+  "Outputs" : {
+    "x_off" : {
+      "MLFeatureShortDescription" : "X offsets in grid cell units; shape (5, 48, 27)."
+    },
+    "y_off" : {
+      "MLFeatureShortDescription" : "Y offsets in grid cell units; shape (5, 48, 27)."
+    },
+    "conf" : {
+      "MLFeatureShortDescription" : "Confidence grids; shape (5, 48, 27)."
+    }
+  },
+  "TrainingInputs" : {
+
+  },
+  "States" : {
+
+  }
+}
