@@ -11,6 +11,10 @@ class BallDetectionManager: ObservableObject {
     private let colorKalmanDetector = ColorKalmanBallDetector()
     private let gridTrackNetDetector = GridTrackNetDetector()
 
+    // Async inference plumbing (minimal): a dedicated queue and in-flight gate.
+    private let detectionQueue = DispatchQueue(label: "ml.ball.gridtracknet", qos: .userInitiated)
+    private var isInFlight = false
+
     init(poseDetectionManager: PoseDetectionManager?) {
         self.poseDetectionManager = poseDetectionManager
     }
@@ -20,12 +24,22 @@ class BallDetectionManager: ObservableObject {
         case .colorKalman:
             let pos = colorKalmanDetector.process(pixelBuffer: pixelBuffer, poseDetectionManager: poseDetectionManager)
             DispatchQueue.main.async { self.ballPosition = pos }
+
         case .gridTrackNet:
-            // Feed frames; when ready, run detection and publish a normalized point.
+            // Feed frames on caller thread (as before), and only offload inference.
             colorKalmanDetector.reset()
             gridTrackNetDetector.pushFrame(pixelBuffer)
-            let pos = gridTrackNetDetector.isReady ? gridTrackNetDetector.detectNormalizedPositionIfReady() : nil
-            DispatchQueue.main.async { self.ballPosition = pos }
+
+            detectionQueue.async { [weak self] in
+                guard let self = self else { return }
+                if self.isInFlight { return }
+                self.isInFlight = true
+                defer { self.isInFlight = false }
+
+                guard self.gridTrackNetDetector.isReady else { return }
+                let pos = self.gridTrackNetDetector.detectNormalizedPositionIfReady()
+                DispatchQueue.main.async { self.ballPosition = pos }
+            }
         }
     }
 }
