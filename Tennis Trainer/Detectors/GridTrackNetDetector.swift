@@ -16,8 +16,8 @@ final class GridTrackNetDetector {
     private var model: GridTrackNet5?
     /// Target frame within the 5-frame window [0..4].
     /// 2 = middle frame: uses two past and two future frames (lower jitter, ~2-frame latency).
-    /// 4 = freshest output (lower latency, less future context). Using 4 temporarily to test alignment.
-    private let targetFrameIndex: Int = 4
+    /// 4 = freshest output (lower latency, less future context). Using 2 (middle) for stability.
+    private let targetFrameIndex: Int = 2
 
     // MARK: - Frame Buffer (oldest → newest)
     private var frames: [CVPixelBuffer] = []
