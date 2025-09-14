@@ -77,7 +77,7 @@ class PoseDetectionManager: ObservableObject {
 //            print("Forearm vector: (\(String(format: "%.3f", forearmVector.x)), \(String(format: "%.3f", forearmVector.y)))")
 //            print("Updated angles - Forearm: \(String(format: "%.1f", forearmAngle))°, Upper: \(String(format: "%.1f", upperArmAngle))°")
         } else {
-            print("Missing keypoints - Shoulder: \(detectedPose[.rightShoulder] != nil), Elbow: \(detectedPose[.rightElbow] != nil), Wrist: \(detectedPose[.rightWrist] != nil)")
+//            print("Missing keypoints - Shoulder: \(detectedPose[.rightShoulder] != nil), Elbow: \(detectedPose[.rightElbow] != nil), Wrist: \(detectedPose[.rightWrist] != nil)")
         }
     }
     

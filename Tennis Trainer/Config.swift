@@ -10,5 +10,5 @@ enum BallDetectionMethod {
 struct AppConfig {
     // Select the active ball detection backend.
     // For now, default to the existing color+Kalman method.
-    static let ballDetectionMethod: BallDetectionMethod = .colorKalman
+    static let ballDetectionMethod: BallDetectionMethod = .gridTrackNet
 }

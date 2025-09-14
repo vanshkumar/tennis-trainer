@@ -1,0 +1,17 @@
+# Known-good conversion stack (Intel Mac, Python 3.11 recommended)
+#
+# Notes:
+# - Use Python 3.11 to avoid the exceptiongroup backport and keep typing-extensions pinned for TF 2.13.
+# - TensorFlow 2.13.x pairs with Keras 2.13.x.
+# - Numpy pinned to 1.24.x to satisfy TF 2.13 wheels.
+# - h5py required to load .h5 weights.
+# - coremltools 7.2 requires protobuf<=4.0.0; pin to 3.20.3 to satisfy TF and coremltools.
+
+tensorflow==2.13.1
+keras==2.13.1
+numpy==1.24.3
+h5py>=3.7
+typing-extensions==4.5.0
+protobuf==3.20.3
+coremltools==7.2
+

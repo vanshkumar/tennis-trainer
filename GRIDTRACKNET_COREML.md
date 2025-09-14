@@ -4,7 +4,7 @@ Concise guide for converting the repo’s GridTrackNet model to a Core ML packag
 
 ## Source & Output
 - Source model: `GridTrackNet/GridTrackNet.py` (Keras, channels-first), weights: `GridTrackNet/model_weights.h5`.
-- Converter script: `convert_gridtracknet.py` (at repo root).
+- Converter script: `tennis-trainer/convert_gridtracknet.py`.
 - Core ML output: `tennis-trainer/Tennis Trainer/Models/GridTrackNet5.mlpackage`.
 - Core ML type: `mlprogram`, precision `fp16`, minimum target iOS 16, compute units = ALL.
 
@@ -12,8 +12,8 @@ Concise guide for converting the repo’s GridTrackNet model to a Core ML packag
 1. Create a fresh venv (Python 3.11 recommended on Intel macOS).
 2. Install pinned deps:
    - `pip install -r requirements-convert.txt`
-3. Run converter from repo root:
-   - `python3 convert_gridtracknet.py`
+3. Run converter from the `tennis-trainer` folder:
+   - `cd tennis-trainer && python3 convert_gridtracknet.py`
 4. Result is saved under tennis-trainer as noted above.
 
 Notes
@@ -23,7 +23,7 @@ Notes
 ## Core ML Model I/O
 Inputs (five images):
 - Names: `f1`, `f2`, `f3`, `f4`, `f5`.
-- Type: RGB images, any size (Core ML auto-resizes to 432×768), scale 1/255 applied in-model.
+- Type: RGB images, size must be 432×768 (W×H); you must resize on iOS. Scale 1/255 is applied in‑model.
 - Recommended: pass BGRA `CVPixelBuffer`s directly; Core ML converts BGRA→RGB internally.
 
 Outputs (three tensors):
@@ -42,6 +42,10 @@ Pixel mapping (per frame index `t`):
 - Suggested detection threshold: `conf[t, row, col] ≥ 0.5`.
 - Normalize if needed: `x_norm = x_px / 768`, `y_norm = y_px / 432`.
 
+Resizing
+- Camera frames like 1920×1080 must be resized to 768×432 before prediction (same 16:9 aspect).
+- Use Core Image (`CILanczosScaleTransform`) or vImage; avoid letterboxing so behavior matches the repo.
+
 ## Swift Usage (Core ML directly)
 ```swift
 import CoreML
@@ -50,7 +54,7 @@ let cfg = MLModelConfiguration()
 cfg.computeUnits = .all
 let model = try GridTrackNet5(configuration: cfg)
 
-// Provide five consecutive frames (any size BGRA CVPixelBuffers)
+// Provide five consecutive frames, each resized to 768×432 BGRA CVPixelBuffers
 let provider = try MLDictionaryFeatureProvider(dictionary: [
   "f1": .init(pixelBuffer: pb1),
   "f2": .init(pixelBuffer: pb2),
@@ -88,7 +92,7 @@ Why Core ML directly (not Vision)
 ## Usage Pattern (recommended)
 - Maintain a 5-frame ring buffer of consecutive frames (consistent spacing: e.g., every frame at 60 fps, or every other at 120 fps).
 - On each new frame, populate `f1…f5` and run one prediction.
-- Use the prediction associated with the middle frame for stable overlays (or all 5 if you prefer).
+- Target frame selection: use the middle frame `t=2` (0-based in `f1…f5`) for stable overlays. This leverages two past and two future frames, reducing jitter at the cost of ~2-frame latency (~33 ms @60 fps). In code, this is controlled by `targetFrameIndex` in `Tennis Trainer/Detectors/GridTrackNetDetector.swift` (default `2`). Set `4` if you prefer the freshest overlay with slightly less context.
 
 ## Gotchas / Tips
 - Do not re-normalize inputs in Swift (model already applies 1/255 scale).
@@ -104,4 +108,3 @@ Why Core ML directly (not Vision)
 
 ---
 Questions or tweaks (e.g., return coordinates directly from the model) can be accommodated by extending the converter wrapper.
-
