@@ -6,7 +6,6 @@ final class PixelBufferScaler {
     static let shared = PixelBufferScaler()
 
     private let ciContext: CIContext
-    private var didLogOnce = false
 
     private init() {
         ciContext = CIContext(options: [.useSoftwareRenderer: false])
@@ -43,13 +42,6 @@ final class PixelBufferScaler {
         let originX = (scaledW - dstW) * 0.5
         let originY = (scaledH - dstH) * 0.5
         let cropRect = CGRect(x: originX, y: originY, width: dstW, height: dstH)
-        if !didLogOnce {
-            let msg = String(format: "PixelBufferScaler: src=%dx%d → dst=%dx%d, scale=%.3f, crop=(%.1f,%.1f,%.1f,%.1f)",
-                             Int(srcW), Int(srcH), Int(dstW), Int(dstH), scale,
-                             cropRect.origin.x, cropRect.origin.y, cropRect.width, cropRect.height)
-            print(msg)
-            didLogOnce = true
-        }
         scaled = scaled.cropped(to: cropRect)
 
         // Allocate destination pixel buffer (BGRA)

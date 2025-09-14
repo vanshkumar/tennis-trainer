@@ -10,7 +10,6 @@ class BallDetectionManager: ObservableObject {
     // Backends
     private let colorKalmanDetector = ColorKalmanBallDetector()
     private let gridTrackNetDetector = GridTrackNetDetector()
-    private var logCount = 0
 
     init(poseDetectionManager: PoseDetectionManager?) {
         self.poseDetectionManager = poseDetectionManager
@@ -26,14 +25,6 @@ class BallDetectionManager: ObservableObject {
             colorKalmanDetector.reset()
             gridTrackNetDetector.pushFrame(pixelBuffer)
             let pos = gridTrackNetDetector.isReady ? gridTrackNetDetector.detectNormalizedPositionIfReady() : nil
-            logCount += 1
-            if logCount % 30 == 0 {
-                if let p = pos {
-                    print(String(format: "Ball pos (norm) x=%.3f y=%.3f", p.x, p.y))
-                } else {
-                    print("Ball pos: nil (no detection)")
-                }
-            }
             DispatchQueue.main.async { self.ballPosition = pos }
         }
     }

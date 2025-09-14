@@ -13,7 +13,6 @@ class VideoPlayerManager: ObservableObject {
     private var playerLayer: AVPlayerLayer?
     private var videoOutput: AVPlayerItemVideoOutput?
     private var displayLink: CADisplayLink?
-    private var didLogVideoInfoOnce = false
     
     // Pose detection components
     var poseDetectionManager: PoseDetectionManager?
@@ -74,7 +73,6 @@ class VideoPlayerManager: ObservableObject {
         videoOutput = AVPlayerItemVideoOutput(pixelBufferAttributes: settings)
         playerItem.add(videoOutput!)
         
-        print("VideoPlayerManager: Set up video output for frame extraction")
     }
     
     private func startFrameProcessing() {
@@ -99,35 +97,7 @@ class VideoPlayerManager: ObservableObject {
             return
         }
         
-        // Determine video orientation once for diagnostics
         let orientation = getVideoOrientation()
-        if !didLogVideoInfoOnce {
-            let w = CVPixelBufferGetWidth(pixelBuffer)
-            let h = CVPixelBufferGetHeight(pixelBuffer)
-            let orientName: String = {
-                switch orientation {
-                case .up: return "up"
-                case .down: return "down"
-                case .left: return "left"
-                case .right: return "right"
-                case .upMirrored: return "upMirrored"
-                case .downMirrored: return "downMirrored"
-                case .leftMirrored: return "leftMirrored"
-                case .rightMirrored: return "rightMirrored"
-                @unknown default: return "unknown"
-                }
-            }()
-            let gravity = (playerLayer?.videoGravity.rawValue ?? "<none>")
-            var layerInfo = ""
-            if let layer = playerLayer {
-                let b = layer.bounds
-                let vr = layer.videoRect
-                layerInfo = String(format: ", layerBounds=%dx%d, videoRect=%dx%d@(%d,%d)",
-                                   Int(b.width), Int(b.height), Int(vr.width), Int(vr.height), Int(vr.origin.x), Int(vr.origin.y))
-            }
-            print("VideoPlayerManager: first frame size=\(w)x\(h), orientation=\(orientName), videoGravity=\(gravity)\(layerInfo)")
-            didLogVideoInfoOnce = true
-        }
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
         ballDetectionManager?.process(pixelBuffer: pixelBuffer)
         

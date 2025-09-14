@@ -23,31 +23,16 @@ final class GridTrackNetDetector {
     private var frames: [CVPixelBuffer] = []
     private let sync = DispatchQueue(label: "ml.gridtracknet.detector")
     private var inferCount: Int = 0
-    private var didLogDimsOnce = false
-    private var didLogTypesOnce = false
-    private var didLogMinMaxOnce = false
-    private var lastAppendTime: CFTimeInterval?
-    private var appendCount: Int = 0
     // Mapping: height=27 (rows), width=48 (cols) — per thesis.
-    private let useSwappedRowCol = false
-    // Temporary: test horizontal mirror of X for display alignment
-    private let flipXForDisplay = true
-    private var didLogFlipOnce = false
-    // Movement diagnostics
-    private var prevBestRow: Int? = nil
-    private var prevBestCol: Int? = nil
-    private var prevNormPoint: CGPoint? = nil
+    
+    
 
     init() {
         do {
             let cfg = MLModelConfiguration()
             cfg.computeUnits = .all
             self.model = try GridTrackNet5(configuration: cfg)
-            // Log input constraint once for visibility
-            if let desc = self.model?.model.modelDescription.inputDescriptionsByName["f1"],
-               let ic = desc.imageConstraint {
-                print("GridTrackNet input constraint: \(ic.pixelsWide)x\(ic.pixelsHigh)")
-            }
+            
         } catch {
             print("GridTrackNetDetector: failed to load model: \(error)")
             self.model = nil
@@ -66,13 +51,11 @@ final class GridTrackNetDetector {
             let targetW = 768
             let targetH = 432
             let bufferToAppend: CVPixelBuffer
-            var resizedFrom: (Int, Int)? = nil
             if w == targetW && h == targetH {
                 bufferToAppend = pixelBuffer
             } else {
                 if let resized = PixelBufferScaler.shared.resizeAspectFill(pixelBuffer, width: targetW, height: targetH) {
                     bufferToAppend = resized
-                    resizedFrom = (w, h)
                 } else {
                     print("GridTrackNetDetector: failed to resize frame (\(w)x\(h)) → (\(targetW)x\(targetH)); skipping.")
                     return
@@ -81,20 +64,6 @@ final class GridTrackNetDetector {
 
             if frames.count == 5 { frames.removeFirst() }
             frames.append(bufferToAppend)
-
-            // Diagnostics: inter-frame dt and luminance of the buffer we feed the model
-            let now = CACurrentMediaTime()
-            let dtMs = lastAppendTime != nil ? (now - lastAppendTime!) * 1000.0 : -1
-            lastAppendTime = now
-            appendCount += 1
-            if appendCount % 30 == 0 {
-                let avgY = averageLuminance(bufferToAppend)
-                let outW = CVPixelBufferGetWidth(bufferToAppend)
-                let outH = CVPixelBufferGetHeight(bufferToAppend)
-                var msg = String(format: "GridTrackNet: feed %dx%d avgY=%.1f dt=%.1f ms", outW, outH, avgY, dtMs)
-                if let rf = resizedFrom { msg += " (resized from \(rf.0)x\(rf.1))" }
-                print(msg)
-            }
         }
     }
 
@@ -107,7 +76,6 @@ final class GridTrackNetDetector {
         return sync.sync { () -> RawOutputs? in
             guard frames.count == 5, let model = model else { return nil }
             do {
-                let t0 = CACurrentMediaTime()
                 let provider = try MLDictionaryFeatureProvider(dictionary: [
                     "f1": MLFeatureValue(pixelBuffer: frames[0]),
                     "f2": MLFeatureValue(pixelBuffer: frames[1]),
@@ -115,13 +83,8 @@ final class GridTrackNetDetector {
                     "f4": MLFeatureValue(pixelBuffer: frames[3]),
                     "f5": MLFeatureValue(pixelBuffer: frames[4]),
                 ])
-
                 let out = try model.model.prediction(from: provider)
-                let dt = (CACurrentMediaTime() - t0) * 1000.0
                 inferCount += 1
-                if inferCount % 30 == 0 {
-                    print(String(format: "GridTrackNet: prediction time %.1f ms", dt))
-                }
 
                 guard let conf = out.featureValue(for: "conf")?.multiArrayValue,
                       let xOff = out.featureValue(for: "x_off")?.multiArrayValue,
@@ -186,21 +149,8 @@ final class GridTrackNetDetector {
             return nil
         }
 
-        if useSwappedRowCol { swap(&rowDim, &colDim) }
         let gridH = shape[rowDim]
         let gridW = shape[colDim]
-        if !didLogDimsOnce {
-            print("GridTrackNet: conf shape=\(shape), strides=\(strides), dims t=\(tDim), r=\(rowDim), c=\(colDim)")
-            print("GridTrackNet: x_off shape=\(xShape), strides=\(xStrides)")
-            print("GridTrackNet: y_off shape=\(yShape), strides=\(yStrides)")
-            didLogDimsOnce = true
-        }
-
-        // Log underlying data types once for diagnostics
-        if !didLogTypesOnce {
-            print("GridTrackNet: dataTypes conf=\(conf.dataType.rawValue) x=\(xOff.dataType.rawValue) y=\(yOff.dataType.rawValue)")
-            didLogTypesOnce = true
-        }
         // Access pointers as Float16 (bits) and convert on read.
         // Model was converted with FLOAT16 precision.
         let confBits = conf.dataPointer.bindMemory(to: UInt16.self, capacity: conf.count)
@@ -246,22 +196,9 @@ final class GridTrackNetDetector {
             }
         }
 
-        if !didLogMinMaxOnce || inferCount % 30 == 0 {
-            print(String(format: "GridTrackNet: conf[t=%d] min=%.3f max=%.3f", t, minConf, maxConf))
-            didLogMinMaxOnce = true
-        }
-
         // Threshold 0.5 (as per thesis and notes)
         let threshold: Float32 = 0.5
-        if inferCount % 30 == 0 {
-            print(String(format: "GridTrackNet: best conf = %.3f (thr=%.2f) at r=%d c=%d", best, threshold, br, bc))
-            // Log offsets at the chosen cell (using each tensor's own strides)
-            let xi = idxWithStrides(xStrides, t, br, bc)
-            let yi = idxWithStrides(yStrides, t, br, bc)
-            let xo = f16(xBits[xi])
-            let yo = f16(yBits[yi])
-            print(String(format: "GridTrackNet: offsets@best x=%.3f y=%.3f (t=%d r=%d c=%d)", xo, yo, t, br, bc))
-        }
+        
         guard best >= threshold else { return nil }
 
         // Map to pixel space (768x432) then normalize. Use per-axis step sizes
@@ -273,72 +210,18 @@ final class GridTrackNetDetector {
 
         var xNorm = CGFloat(xPx / 768.0)
         let yNormTop = CGFloat(yPx / 432.0)
-
         // Convert to Vision-style bottom-left origin
         var yNorm = 1.0 - yNormTop
 
-        // Optional: horizontal mirror
-        if flipXForDisplay {
-            xNorm = 1.0 - xNorm
-            if !didLogFlipOnce {
-                print("GridTrackNet: applying horizontal X flip for display alignment")
-                didLogFlipOnce = true
-            }
-        }
+        
 
         // Clamp to [0,1]
         xNorm = min(max(xNorm, 0.0), 1.0)
         yNorm = min(max(yNorm, 0.0), 1.0)
 
-        if inferCount % 30 == 0 {
-            // Movement diagnostics
-            var cellMove = ""
-            if let pr = prevBestRow, let pc = prevBestCol {
-                let dr = br - pr
-                let dc = bc - pc
-                let mag = sqrt(Float(dr*dr + dc*dc))
-                cellMove = String(format: " cellΔ r=%d c=%d |Δ|=%.1f", dr, dc, mag)
-            }
-            var normMove = ""
-            if let p = prevNormPoint {
-                let dx = Double(xNorm - p.x)
-                let dy = Double(yNorm - p.y)
-                let dmag = sqrt(dx*dx + dy*dy)
-                normMove = String(format: " normΔ x=%.3f y=%.3f |Δ|=%.3f", dx, dy, dmag)
-            }
-            print(String(format: "GridTrackNet: norm pos (x=%.3f,y=%.3f)%@%@", xNorm, yNorm, cellMove, normMove))
-        }
-        prevBestRow = br
-        prevBestCol = bc
-        prevNormPoint = CGPoint(x: xNorm, y: yNorm)
+        
         return CGPoint(x: xNorm, y: yNorm)
     }
 }
 
-// MARK: - Diagnostics helpers
-private extension GridTrackNetDetector {
-    func averageLuminance(_ pixelBuffer: CVPixelBuffer, sampleStride: Int = 8) -> Double {
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return -1 }
-        let w = CVPixelBufferGetWidth(pixelBuffer)
-        let h = CVPixelBufferGetHeight(pixelBuffer)
-        let bpr = CVPixelBufferGetBytesPerRow(pixelBuffer)
-
-        var sum: Double = 0
-        var count: Int = 0
-        for y in stride(from: 0, to: h, by: sampleStride) {
-            let row = base.advanced(by: y * bpr)
-            for x in stride(from: 0, to: w, by: sampleStride) {
-                let p = row.advanced(by: x * 4)
-                let b = Double(p.load(fromByteOffset: 0, as: UInt8.self))
-                let g = Double(p.load(fromByteOffset: 1, as: UInt8.self))
-                let r = Double(p.load(fromByteOffset: 2, as: UInt8.self))
-                // Rec.709 luma
-                sum += 0.2126 * r + 0.7152 * g + 0.0722 * b
-                count += 1
-            }
-        }
-        return count > 0 ? sum / Double(count) : -1
-    }
-}
+// No private diagnostics helpers remain.

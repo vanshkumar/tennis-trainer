@@ -58,10 +58,13 @@ def build_wrapped_model(repo_root: Path):
     x = Concatenate(axis=1, name="stack_5xRGB")(nchw)
 
     # Run core and split 15 channels -> (5 frames) x (3 heads)
-    y = core(x)  # [N, 15, 48, 27] (C,H,W)
-    y = Permute((2, 3, 1), name="to_HW_C")(y)  # [N, 48, 27, 15]
-    y = Reshape((48, 27, 5, 3), name="to_HW_F3")(y)  # [N, 48, 27, 5, 3]
-    y = Permute((3, 1, 2, 4), name="to_F_HW_C")(y)  # [N, 5, 48, 27, 3]
+    # Core output is channels_first: [N, 15, H=27, W=48]
+    y = core(x)  # [N, 15, 27, 48] (C,H,W)
+    # Move channels last to split by (5 frames x 3 heads) without touching spatial HW
+    y = Permute((2, 3, 1), name="to_HW_C")(y)  # [N, 27, 48, 15]
+    y = Reshape((27, 48, 5, 3), name="to_HW_F3")(y)  # [N, 27, 48, 5, 3]
+    # Reorder to [N, 5 (frames), 48 (X/cols), 27 (Y/rows), 3 (heads)]
+    y = Permute((3, 2, 1, 4), name="to_F_WH_C")(y)  # [N, 5, 48, 27, 3]
 
     conf = Lambda(lambda t: t[..., 0], name="conf")(y)  # [N, 5, 48, 27]
     x_off = Lambda(lambda t: t[..., 1], name="x_off")(y)  # [N, 5, 48, 27]

@@ -25,14 +25,11 @@ class CameraManager: NSObject, ObservableObject {
     private func checkPermissions() {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized:
-            print("Camera permission: authorized")
             hasPermission = true
             setupCamera()
         case .notDetermined:
-            print("Camera permission: requesting...")
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async {
-                    print("Camera permission: \(granted ? "granted" : "denied")")
                     self.hasPermission = granted
                     if granted {
                         self.setupCamera()
@@ -40,13 +37,10 @@ class CameraManager: NSObject, ObservableObject {
                 }
             }
         case .denied:
-            print("Camera permission: denied")
             hasPermission = false
         case .restricted:
-            print("Camera permission: restricted")
             hasPermission = false
         @unknown default:
-            print("Camera permission: unknown")
             hasPermission = false
         }
     }
@@ -58,7 +52,6 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureSession() {
-        print("Configuring camera session...")
         captureSession.beginConfiguration()
         
         captureSession.sessionPreset = .high
@@ -69,8 +62,6 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
         
-        print("Found camera: \(videoDevice.localizedName)")
-        
         guard let videoInput = try? AVCaptureDeviceInput(device: videoDevice) else {
             print("Error: Could not create camera input")
             captureSession.commitConfiguration()
@@ -79,7 +70,6 @@ class CameraManager: NSObject, ObservableObject {
         
         if captureSession.canAddInput(videoInput) {
             captureSession.addInput(videoInput)
-            print("Added camera input successfully")
         } else {
             print("Error: Could not add camera input to session")
             captureSession.commitConfiguration()
@@ -91,13 +81,11 @@ class CameraManager: NSObject, ObservableObject {
         
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
-            print("Added video output successfully")
         } else {
             print("Error: Could not add video output to session")
         }
         
         captureSession.commitConfiguration()
-        print("Camera session configuration complete")
     }
     
     private func configureVideoOutput() {
@@ -135,11 +123,9 @@ class CameraManager: NSObject, ObservableObject {
     func startCapture() {
         sessionQueue.async {
             if !self.captureSession.isRunning {
-                print("Starting camera capture...")
                 self.captureSession.startRunning()
                 DispatchQueue.main.async {
                     self.isRecording = true
-                    print("Camera capture started")
                 }
             }
         }
@@ -148,11 +134,9 @@ class CameraManager: NSObject, ObservableObject {
     func stopCapture() {
         sessionQueue.async {
             if self.captureSession.isRunning {
-                print("Stopping camera capture...")
                 self.captureSession.stopRunning()
                 DispatchQueue.main.async {
                     self.isRecording = false
-                    print("Camera capture stopped")
                 }
             }
         }
@@ -162,7 +146,6 @@ class CameraManager: NSObject, ObservableObject {
         if previewLayer == nil {
             previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
             previewLayer?.videoGravity = .resizeAspectFill
-            print("Created preview layer for session")
         }
         return previewLayer!
     }
