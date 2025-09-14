@@ -41,3 +41,11 @@
 - Add features as `*Manager` (logic) and `*View` (UI); integrate via `ContentView` as needed.
 - Keep public surface area minimal; document decisions in the PR description.
 
+### GridTrackNet Implementation Notes
+- Input frames: RGB, 768×432 (landscape). Pre-resize with aspect‑fill (no letterboxing).
+- Temporal window: 5 frames, oldest→newest. Default target frame is `t=2` (middle) for accuracy.
+- Output tensors: `conf`, `x_off`, `y_off` with shape `[5, 48 (W), 27 (H)]`; FP16 in the packaged model.
+- Decode: argmax on `conf[t,:,:]` → (row,col); pixel mapping `x=(col+x_off)*16`, `y=(row+y_off)*16`; normalize by 768×432; origin bottom‑left.
+- Use each tensor’s own `MLMultiArray.strides` when indexing; do not swap width/height or x/y.
+- Converter: use `convert_gridtracknet.py`. Ensure channel/head split produces `conf/x_off/y_off` in that order. Rebuild `GridTrackNet5.mlpackage` rather than editing generated Swift.
+- Logging: avoid noisy prints in production code; retain error logs only.

@@ -23,11 +23,11 @@ Notes
 ## Core ML Model I/O
 Inputs (five images):
 - Names: `f1`, `f2`, `f3`, `f4`, `f5`.
-- Type: RGB images, size must be 432×768 (W×H); you must resize on iOS. Scale 1/255 is applied in‑model.
+- Type: RGB images, size must be 768×432 (W×H); you must resize on iOS. Scale 1/255 is applied in‑model.
 - Recommended: pass BGRA `CVPixelBuffer`s directly; Core ML converts BGRA→RGB internally.
 
 Outputs (three tensors):
-- `conf`: confidence grids, shape `[5, 48, 27]` (Float32).
+- `conf`: confidence grids, shape `[5, 48, 27]` (Float16 in the shipped mlpackage).
 - `x_off`: X offsets (grid units), shape `[5, 48, 27]`.
 - `y_off`: Y offsets (grid units), shape `[5, 48, 27]`.
 
@@ -71,17 +71,21 @@ let yOff  = out.featureValue(for: "y_off")!.multiArrayValue!
 // Example: argmax on frame t=2 and map to pixels
 let gridW = 48, gridH = 27
 let s = conf.strides.map { Int(truncating: $0) }
-let pc = conf.dataPointer.assumingMemoryBound(to: Float32.self)
-let px = xOff.dataPointer.assumingMemoryBound(to: Float32.self)
-let py = yOff.dataPointer.assumingMemoryBound(to: Float32.self)
+
+// Note: outputs are Float16 in the packaged model; read accordingly.
+let pcBits = conf.dataPointer.bindMemory(to: UInt16.self, capacity: conf.count)
+let pxBits = xOff.dataPointer.bindMemory(to: UInt16.self, capacity: xOff.count)
+let pyBits = yOff.dataPointer.bindMemory(to: UInt16.self, capacity: yOff.count)
+@inline(__always) func f16(_ u: UInt16) -> Float32 { Float32(Float16(bitPattern: u)) }
+
 func idx(_ t:Int,_ r:Int,_ c:Int)->Int { t*s[0] + r*s[1] + c*s[2] }
 var best: Float32 = -1; var br = 0; var bc = 0
 for r in 0..<gridH { for c in 0..<gridW {
-  let v = pc[idx(2,r,c)]; if v > best { best = v; br = r; bc = c }
+  let v = f16(pcBits[idx(2,r,c)]); if v > best { best = v; br = r; bc = c }
 }}
 if best >= 0.5 {
-  let x = (Float32(bc) + px[idx(2,br,bc)]) * 16
-  let y = (Float32(br) + py[idx(2,br,bc)]) * 16
+  let x = (Float32(bc) + f16(pxBits[idx(2,br,bc)])) * 16
+  let y = (Float32(br) + f16(pyBits[idx(2,br,bc)])) * 16
   // map (x,y) from 768×432 to your view space as needed
 }
 ```
@@ -92,13 +96,14 @@ Why Core ML directly (not Vision)
 ## Usage Pattern (recommended)
 - Maintain a 5-frame ring buffer of consecutive frames (consistent spacing: e.g., every frame at 60 fps, or every other at 120 fps).
 - On each new frame, populate `f1…f5` and run one prediction.
-- Target frame selection: use the middle frame `t=2` (0-based in `f1…f5`) for stable overlays. This leverages two past and two future frames, reducing jitter at the cost of ~2-frame latency (~33 ms @60 fps). In code, this is controlled by `targetFrameIndex` in `Tennis Trainer/Detectors/GridTrackNetDetector.swift` (default `2`). Set `4` if you prefer the freshest overlay with slightly less context.
+- Target frame selection: use the middle frame `t=2` (0-based in `f1…f5`) for accuracy (best for contact/change-of-direction). This leverages two past and two future frames, with ~2-frame latency (~33 ms @60 fps). Controlled by `targetFrameIndex` in `Tennis Trainer/Detectors/GridTrackNetDetector.swift` (default `2`).
 
 ## Gotchas / Tips
 - Do not re-normalize inputs in Swift (model already applies 1/255 scale).
 - Keep orientation consistent (landscape). Avoid letterboxing inside the pixel buffer; pre-resize if you need exact framing.
 - Temporal alignment matters: the 5 frames should be contiguous and similarly spaced; avoid per-frame recentered crops.
-- If you later use an ROI, apply the same crop to all 5 frames of a clip, and map predictions back via the crop’s `(ox, oy, w, h)`.
+- Grid is width=48, height=27 (cell size 16 px). Do not swap axes when decoding.
+- Outputs are Float16; if you read via pointers, convert from Float16 to Float32. Using each tensor’s own strides is required.
 - Performance: FP16 + `computeUnits = .all` enables Neural Engine/GPU where available. Using a sliding window (reuse 4 frames) reduces memory copies.
 
 ## Maintenance
