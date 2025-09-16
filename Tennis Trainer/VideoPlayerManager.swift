@@ -99,7 +99,8 @@ class VideoPlayerManager: ObservableObject {
         
         let orientation = getVideoOrientation()
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
-        ballDetectionManager?.process(pixelBuffer: pixelBuffer)
+        let ts = CMTimeGetSeconds(currentTime)
+        ballDetectionManager?.process(pixelBuffer: pixelBuffer, timestamp: ts)
         
         // Check for horizontal forearm and trigger callback
         let shouldBeep = checkForearmHorizontal()
@@ -206,7 +207,8 @@ class VideoPlayerManager: ObservableObject {
     }
 
     func setupBallDetection(with pose: PoseDetectionManager) {
-        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose)
+        // Video overlay can favor stability (t=2, default)
+        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 2)
     }
     
     private func cleanup() {

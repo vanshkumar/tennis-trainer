@@ -178,6 +178,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - Setup
 extension CameraManager {
     func setupBallDetection(with pose: PoseDetectionManager) {
-        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose)
+        // Live overlay prefers the freshest frame index (t=4)
+        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
     }
 }
