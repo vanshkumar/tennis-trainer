@@ -40,6 +40,9 @@
 - Do not rename the `Tennis Trainer` target/folder or change the bundle identifier.
 - Add features as `*Manager` (logic) and `*View` (UI); integrate via `ContentView` as needed.
 - Keep public surface area minimal; document decisions in the PR description.
+- The Xcode project uses `PBXFileSystemSynchronizedRootGroup`, so any file or folder created under `Tennis Trainer/` is automatically picked up by the build target — no `.pbxproj` edits needed for moves or new files.
+- Parked / archived code lives under `Tennis Trainer/Archived/<Topic>/` (created on demand). Files there compile but should remain unwired from live code paths. Each topic folder contains a `README.md` explaining what it is and how to revive it.
+- If a `SERVE_PIVOT_IMPL.md` (or similarly named `*_IMPL.md`) sits at the repo root, treat it as the active engineering handoff brief — read it before making code changes in the area it describes. These files are temporary and should be deleted once their scope is complete.
 
 ### GridTrackNet Implementation Notes
 - Input frames: RGB, 768×432 (landscape). Pre-resize with aspect‑fill (no letterboxing).
