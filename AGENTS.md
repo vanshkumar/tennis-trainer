@@ -1,11 +1,20 @@
 # Repository Guidelines
 
+## Documentation Map
+- Start here for repository rules and operating conventions.
+- Then read `docs/README.md` for the knowledge map and doc reading order.
+- Read `ARCHITECTURE.md` for the current runtime/data-flow overview.
+- Product intent lives in `README.md` and `PRD.MD`.
+- Technical model/reference material lives in `GRIDTRACKNET_COREML.md`.
+- If a `*_IMPL.md` file exists at the repo root, treat it as the active execution brief for that area until it is deleted.
+
 ## Project Structure & Module Organization
 - `Tennis Trainer/` — SwiftUI app code (views and managers). Examples: `ContentView.swift`, `CameraManager.swift`, `BallDetectionManager.swift`, assets in `Assets.xcassets`.
 - `Tennis TrainerTests/` — unit tests (XCTest).
 - `Tennis TrainerUITests/` — UI tests (XCTest).
 - `Tennis Trainer.xcodeproj/` — Xcode project, schemes, and build settings.
-- Root: `README.md`, `LICENSE`, `CLAUDE.md`.
+- Root: `README.md`, `PRD.MD`, `ARCHITECTURE.md`, `GRIDTRACKNET_COREML.md`, `LICENSE`.
+- `docs/` — lightweight knowledge base index and doc categories. Prefer adding new long-form repository knowledge there instead of expanding this file indefinitely.
 
 ## Build, Test, and Development Commands
 - Open project: `open "Tennis Trainer.xcodeproj"` (or `xed .`).
