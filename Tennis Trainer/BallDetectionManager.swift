@@ -15,9 +15,11 @@ class BallDetectionManager: ObservableObject {
     // Async inference plumbing (minimal): a dedicated queue and in-flight gate.
     private let detectionQueue = DispatchQueue(label: "ml.ball.gridtracknet", qos: .userInitiated)
     private var isInFlight = false
+    private let apexDetector = ServeTossApexDetector()
 
     // Optional: structured track callback (five samples per inference)
     var onBallTrack: (([GridTrackNetDetector.Sample]) -> Void)?
+    var onApex: (() -> Void)?
 
     private let overlayTIndex: Int
 
@@ -35,6 +37,7 @@ class BallDetectionManager: ObservableObject {
         switch AppConfig.ballDetectionMethod {
         case .colorKalman:
             let pos = colorKalmanDetector.process(pixelBuffer: pixelBuffer, poseDetectionManager: poseDetectionManager)
+            apexDetector.reset()
             DispatchQueue.main.async { self.ballPosition = pos }
 
         case .gridTrackNet:
@@ -53,11 +56,23 @@ class BallDetectionManager: ObservableObject {
                     if let s = samples.first(where: { $0.tIndex == self.overlayTIndex }) {
                         DispatchQueue.main.async { self.ballPosition = s.position }
                     }
-                    if let cb = self.onBallTrack {
-                        DispatchQueue.main.async { cb(samples) }
+                    DispatchQueue.main.async {
+                        self.onBallTrack?(samples)
+                        if self.apexDetector.consume(samples: samples, heightGateProvider: self.poseDetectionManager) {
+                            self.onApex?()
+                        }
                     }
                 }
             }
+        }
+    }
+
+    func resetTrackingState() {
+        colorKalmanDetector.reset()
+        gridTrackNetDetector.clear()
+        apexDetector.reset()
+        DispatchQueue.main.async {
+            self.ballPosition = nil
         }
     }
 }

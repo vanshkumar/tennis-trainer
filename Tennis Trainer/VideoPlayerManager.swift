@@ -17,9 +17,8 @@ class VideoPlayerManager: ObservableObject {
     // Pose detection components
     var poseDetectionManager: PoseDetectionManager?
     var ballDetectionManager: BallDetectionManager?
-    var onFrameProcessed: ((Bool) -> Void)?
-    
-    private let horizontalDetector = ForearmHorizontalDetector()
+    var onFrameProcessed: (() -> Void)?
+    var onApex: (() -> Void)?
     
     func loadVideo(from url: URL) {
         isLoading = true
@@ -101,18 +100,10 @@ class VideoPlayerManager: ObservableObject {
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
         let ts = CMTimeGetSeconds(currentTime)
         ballDetectionManager?.process(pixelBuffer: pixelBuffer, timestamp: ts)
-        
-        // Check for horizontal forearm and trigger callback
-        let shouldBeep = checkForearmHorizontal()
-        
+
         DispatchQueue.main.async {
-            self.onFrameProcessed?(shouldBeep)
+            self.onFrameProcessed?()
         }
-    }
-    
-    private func checkForearmHorizontal() -> Bool {
-        guard let poseManager = poseDetectionManager else { return false }
-        return horizontalDetector.checkForearmHorizontal(forearmAngle: poseManager.forearmAngle)
     }
     
     private func getVideoOrientation() -> CGImagePropertyOrientation {
@@ -178,11 +169,13 @@ class VideoPlayerManager: ObservableObject {
         let cmTime = CMTime(seconds: time, preferredTimescale: 600)
         player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = time
+        ballDetectionManager?.resetTrackingState()
     }
     
     func resetToBeginning() {
         player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = 0
+        ballDetectionManager?.resetTrackingState()
     }
     
     func getPlayerItem() -> AVPlayerItem? {
@@ -208,7 +201,11 @@ class VideoPlayerManager: ObservableObject {
 
     func setupBallDetection(with pose: PoseDetectionManager) {
         // Video overlay can favor stability (t=2, default)
-        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 2)
+        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 2)
+        manager.onApex = { [weak self] in
+            self?.onApex?()
+        }
+        self.ballDetectionManager = manager
     }
     
     private func cleanup() {
@@ -234,8 +231,7 @@ class VideoPlayerManager: ObservableObject {
             playerLayer = nil
         }
         
-        // Reset horizontal detection state
-        horizontalDetector.reset()
+        ballDetectionManager?.resetTrackingState()
         
         player = nil
         playerItem = nil

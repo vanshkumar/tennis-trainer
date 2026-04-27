@@ -11,5 +11,5 @@ This folder indexes product intent and behavior docs.
 
 ## Notes
 
-- The repo is currently in a transition state: the product framing has pivoted to serve training, while the live cue implementation is still forehand-based.
-- That migration work is tracked in `../../SERVE_PIVOT_IMPL.md`, not here, because it is an execution brief rather than a stable product document.
+- The repo is now aligned around serve training, with the live cue implemented as a serve toss-apex beep.
+- The previous forehand cue is parked under `../../Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` rather than deleted.

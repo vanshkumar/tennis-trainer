@@ -56,7 +56,7 @@ struct ContentView: View {
             videoPlayerManager.poseDetectionManager = poseDetectionManager
             videoPlayerManager.setupBallDetection(with: poseDetectionManager)
             
-            cameraManager.onFrameProcessed = { shouldBeep in
+            cameraManager.onFrameProcessed = {
                 frameCount += 1
                 
                 let now = Date()
@@ -65,14 +65,10 @@ struct ContentView: View {
                     fps = Double(frameCount) / timeDiff
                     frameCount = 0
                     lastFrameTime = now
-                }
-                
-                if shouldBeep {
-                    audioManager.playBeep()
                 }
             }
             
-            videoPlayerManager.onFrameProcessed = { shouldBeep in
+            videoPlayerManager.onFrameProcessed = {
                 frameCount += 1
                 
                 let now = Date()
@@ -82,10 +78,13 @@ struct ContentView: View {
                     frameCount = 0
                     lastFrameTime = now
                 }
-                
-                if shouldBeep {
-                    audioManager.playBeep()
-                }
+            }
+
+            cameraManager.onApex = {
+                audioManager.playBeep()
+            }
+            videoPlayerManager.onApex = {
+                audioManager.playBeep()
             }
         }
         .onChange(of: selectedVideoURL) { _, newURL in
@@ -156,12 +155,6 @@ struct ContentView: View {
                         Spacer()
                         
                         VStack(alignment: .trailing) {
-                            Text("Forearm: \(String(format: "%.1f°", poseDetectionManager.forearmAngle))")
-                                .foregroundColor(.white)
-                                .font(.caption)
-                            Text("Upper Arm: \(String(format: "%.1f°", poseDetectionManager.upperArmAngle))")
-                                .foregroundColor(.white)
-                                .font(.caption)
                             Text("Joints: \(poseDetectionManager.detectedPose.count)")
                                 .foregroundColor(.white)
                                 .font(.caption)
@@ -289,18 +282,6 @@ struct ContentView: View {
                             .cornerRadius(8)
                             
                             Spacer()
-                            
-                            VStack(alignment: .trailing) {
-                                Text("Forearm: \(String(format: "%.1f°", poseDetectionManager.forearmAngle))")
-                                    .foregroundColor(.white)
-                                    .font(.caption)
-                                Text("Upper Arm: \(String(format: "%.1f°", poseDetectionManager.upperArmAngle))")
-                                    .foregroundColor(.white)
-                                    .font(.caption)
-                            }
-                            .padding(8)
-                            .background(Color.black.opacity(0.6))
-                            .cornerRadius(8)
                         }
                         .padding(.horizontal)
                         

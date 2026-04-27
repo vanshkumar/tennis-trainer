@@ -2,8 +2,7 @@
 
 Current active execution brief:
 
-- `../../../SERVE_PIVOT_IMPL.md`
-  Serve pivot handoff for replacing the current forehand beep heuristic with a serve toss-apex detector.
+- None currently.
 
 ## How To Use This Folder
 

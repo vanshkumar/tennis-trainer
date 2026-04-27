@@ -13,9 +13,8 @@ class CameraManager: NSObject, ObservableObject {
     
     var poseDetectionManager: PoseDetectionManager?
     var ballDetectionManager: BallDetectionManager?
-    var onFrameProcessed: ((Bool) -> Void)?
-    
-    private let horizontalDetector = ForearmHorizontalDetector()
+    var onFrameProcessed: (() -> Void)?
+    var onApex: (() -> Void)?
     
     override init() {
         super.init()
@@ -161,17 +160,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func processFrame(pixelBuffer: CVPixelBuffer) {
         poseDetectionManager?.detectPose(in: pixelBuffer)
         ballDetectionManager?.process(pixelBuffer: pixelBuffer)
-        
-        let shouldBeep = checkForearmHorizontal()
-        
+
         DispatchQueue.main.async {
-            self.onFrameProcessed?(shouldBeep)
+            self.onFrameProcessed?()
         }
-    }
-    
-    private func checkForearmHorizontal() -> Bool {
-        guard let poseManager = poseDetectionManager else { return false }
-        return horizontalDetector.checkForearmHorizontal(forearmAngle: poseManager.forearmAngle)
     }
 }
 
@@ -179,6 +171,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 extension CameraManager {
     func setupBallDetection(with pose: PoseDetectionManager) {
         // Live overlay prefers the freshest frame index (t=4)
-        self.ballDetectionManager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
+        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
+        manager.onApex = { [weak self] in
+            self?.onApex?()
+        }
+        self.ballDetectionManager = manager
     }
 }
