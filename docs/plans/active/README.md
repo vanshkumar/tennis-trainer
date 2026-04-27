@@ -2,7 +2,10 @@
 
 Current active execution brief:
 
-- None currently.
+- No checked-in root `*_IMPL.md` brief is present right now.
+- The serve pivot brief is absent because that work has already been implemented and its durable outcomes now live in `../../../README.md`, `../../../PRD.MD`, and `../../../ARCHITECTURE.md`.
+- If a task or chat message references an active implementation brief by name, confirm the file exists in the repo before treating it as source of truth.
+- Until a brief is checked in, use `../../RAMPUP.md`, `../../../ARCHITECTURE.md`, and `../../../PRD.MD` as the current orientation set.
 
 ## How To Use This Folder
 

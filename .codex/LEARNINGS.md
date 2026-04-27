@@ -19,3 +19,6 @@
 - Friction point: even after the simulator finished first-boot migration and the default scheme was narrowed to unit tests, the hosted `Tennis TrainerTests` bundle still hangs after packaging and codesigning, before any XCTest execution output appears.
 - Fix: once the simulator finished first-boot migration, hosted XCTest launched correctly. The remaining red tests were real detector logic failures, not harness failures.
 - Root cause: `ServeTossApexDetector.consume` only evaluated `buffer[count - 2]` once per batch, so 5-sample batches could skip the true apex entirely. Walking each newly eligible triplet once fixed the missed-apex behavior and made the detector tests pass.
+- Friction point: a task can reference a root `*_IMPL.md` brief that is not actually checked into the repo yet. Make active-work state explicit in `docs/plans/active/README.md` so a fresh session does not infer hidden context.
+- Signpost: when a temporary `*_IMPL.md` brief is completed and removed, record that completion state in `docs/plans/active/README.md` and point to the durable docs that replaced it.
+- Signpost: for a repo this size, apply the article’s principles narrowly. Keep the map, ramp-up path, and active-work pointers; avoid adding recurring scorecards or governance docs unless they solve repeated real friction.
