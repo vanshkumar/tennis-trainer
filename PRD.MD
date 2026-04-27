@@ -18,9 +18,9 @@ SwiftUI iOS app that provides on-device pose and ball detection for tennis. Two 
 ## Detection & Feedback
 
 ### Pose (Vision)
-- `VNDetectHumanBodyPoseRequest` (rev 1). Joints currently collected with confidence > 0.3: right shoulder, right elbow, right wrist.
+- `VNDetectHumanBodyPoseRequest` (rev 1). Joints currently collected with confidence > 0.3: nose, neck, right shoulder, right elbow, right wrist.
 - Computes upper-arm and forearm angles relative to horizontal; values currently shown in the HUD.
-- **Planned addition**: collect `nose` and `neck` so the toss-apex height gate can use a pose-relative threshold (see Implementation status).
+- `nose` and `neck` provide the pose-relative height gate used by the toss-apex detector.
 
 ### Ball — GridTrackNet (default)
 - 5-frame model. Inputs: RGB 768×432 (resized aspect-fill, no letterbox), frames ordered oldest → newest.
@@ -72,12 +72,13 @@ Behind-the-player framing also works for the toss apex cue specifically (the bal
 ## Roadmap (future work)
 - **Trophy position** cue: detect the loaded trophy moment (right elbow above shoulder, racket dropped behind back as a wrist-below-elbow proxy since the racket isn't tracked). Builds on the same pose seam as toss apex.
 - **Contact-on-serve**: easier than forehand contact because the ball trajectory after the apex is constrained — heuristics like ball-y descending + wrist-y rising + minimum ball-wrist distance are tractable without racket detection.
-- **Multi-stroke support** (forehand, etc.). Forehand revival starts from the parked code under `Tennis Trainer/Archived/Forehand/` (see `SERVE_PIVOT_IMPL.md`).
+- **Multi-stroke support** (forehand, etc.). Forehand revival starts from the parked code documented in `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md`.
 
 ## Implementation status
-The **forearm-horizontal beep** (the original forehand-contact heuristic) is **still wired** in `CameraManager`, `VideoPlayerManager`, `ContentView`, and `ForearmHorizontalDetector` as of this commit. The pivot to the serve toss apex described above — including parking the forehand cue, adding `nose`/`neck` to the pose joint set, and implementing `ServeTossApexDetector` — is tracked as a self-contained handoff in **`SERVE_PIVOT_IMPL.md`** at the repo root. That file is intended to be picked up by a coding agent in a fresh session and deleted on completion.
+The toss-apex detector is implemented. The original forehand cue code is parked under `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md`.
 
 ## Testing (current state)
-- Unit tests: Swift Testing framework scaffold present but empty.
+- Unit tests: `ServeTossApexDetectorTests` covers synthetic parabolic tosses, cooldown behavior, pose-relative suppression, and low-confidence peaks.
+- CLI unit-test scheme: `Tennis Trainer`.
 - UI tests: XCTest scaffolds present (launch and placeholder test).
-- The toss-apex detector should ship with unit tests against synthetic parabolic sample tracks (covered in `SERVE_PIVOT_IMPL.md` Step C).
+- CLI UI-test scheme: `Tennis Trainer UI Tests`.

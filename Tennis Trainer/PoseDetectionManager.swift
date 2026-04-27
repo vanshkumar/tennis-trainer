@@ -33,6 +33,7 @@ class PoseDetectionManager: ObservableObject {
     
     private func processPoseObservation(_ observation: VNHumanBodyPoseObservation) {
         let jointNames: [VNHumanBodyPoseObservation.JointName] = [
+            .nose, .neck,
             .leftShoulder, .rightShoulder,
             .leftElbow, .rightElbow,
             .leftWrist, .rightWrist
@@ -51,6 +52,7 @@ class PoseDetectionManager: ObservableObject {
         self.calculateAngles()
     }
     
+    // Currently unused. Kept for future stroke-analysis work (see Tennis Trainer/Archived/Forehand/).
     private func calculateAngles() {
         // Calculate right arm angles (can be modified for left arm or both)
         if let shoulder = detectedPose[.rightShoulder],
@@ -101,5 +103,17 @@ class PoseDetectionManager: ObservableObject {
     
     func getJointConfidence(for jointName: VNHumanBodyPoseObservation.JointName) -> Float? {
         return detectedPose[jointName]?.confidence
+    }
+}
+
+extension PoseDetectionManager: ServeTossApexHeightGateProviding {
+    var serveTossApexGateBaselineY: CGFloat? {
+        if let nose = detectedPose[.nose], nose.confidence > 0.3 {
+            return nose.location.y
+        }
+        if let neck = detectedPose[.neck], neck.confidence > 0.3 {
+            return neck.location.y
+        }
+        return nil
     }
 }

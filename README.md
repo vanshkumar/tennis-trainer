@@ -21,4 +21,4 @@ Current scope:
 - Solo serve practice. Right-handed only for now.
 - Recommended camera placement: side-on, toss-arm side. Behind-the-player still works for the toss apex but won't carry forward to richer cues.
 
-Status: work in progress. The active beep cue in the codebase is being pivoted from a forehand contact heuristic to the serve toss apex described above; see `PRD.MD` for the spec and `SERVE_PIVOT_IMPL.md` for the in-flight engineering work.
+Status: work in progress. The active beep cue in the codebase is the serve toss apex described above; see `PRD.MD` for the current behavior and `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` for the parked forehand heuristic.

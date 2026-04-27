@@ -19,7 +19,8 @@
 ## Build, Test, and Development Commands
 - Open project: `open "Tennis Trainer.xcodeproj"` (or `xed .`).
 - Build (CLI): `xcodebuild -scheme "Tennis Trainer" -destination 'platform=iOS Simulator,name=iPhone 15' build`.
-- Run tests: `xcodebuild test -scheme "Tennis Trainer" -destination 'platform=iOS Simulator,name=iPhone 15'`.
+- Run unit tests (CLI): `xcodebuild test -scheme "Tennis Trainer" -destination 'platform=iOS Simulator,name=iPhone 15'`.
+- Run UI tests (CLI): `xcodebuild test -scheme "Tennis Trainer UI Tests" -destination 'platform=iOS Simulator,name=iPhone 15'`.
 - Run locally: select an iOS Simulator in Xcode and press Run. Prefer iPhone 15 or newer for consistent results.
 
 ## Coding Style & Naming Conventions
@@ -30,7 +31,7 @@
 - One primary type per file; filename matches type name.
 
 ## Testing Guidelines
-- Framework: XCTest.
+- Frameworks: XCTest for UI tests; the unit-test target currently contains XCTest-based tests and a small Swift Testing scaffold.
 - Unit tests live in `Tennis TrainerTests/`; UI tests in `Tennis TrainerUITests/`.
 - Name tests `test<Behavior_WhenCondition>` and focus on observable behavior.
 - Run all tests via the CLI command above or Xcode’s Test action. Add/adjust tests when changing detection/processing logic.

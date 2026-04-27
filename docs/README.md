@@ -41,5 +41,4 @@ The repo is still small, so the goal is not to create a heavy documentation syst
 - Product framing: `../README.md`
 - Product spec: `../PRD.MD`
 - Architecture: `../ARCHITECTURE.md`
-- Active implementation brief: `../SERVE_PIVOT_IMPL.md`
 - GridTrackNet reference: `../GRIDTRACKNET_COREML.md`
