@@ -79,4 +79,6 @@ The toss-apex detector is implemented. The original forehand cue code is parked 
 
 ## Testing (current state)
 - Unit tests: `ServeTossApexDetectorTests` covers synthetic parabolic tosses, cooldown behavior, pose-relative suppression, and low-confidence peaks.
+- CLI unit-test scheme: `Tennis Trainer`.
 - UI tests: XCTest scaffolds present (launch and placeholder test).
+- CLI UI-test scheme: `Tennis Trainer UI Tests`.

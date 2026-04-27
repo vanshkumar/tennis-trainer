@@ -18,6 +18,7 @@ class CameraManager: NSObject, ObservableObject {
     
     override init() {
         super.init()
+        guard !AppRuntime.isRunningTests else { return }
         checkPermissions()
     }
     
@@ -120,6 +121,7 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func startCapture() {
+        guard !AppRuntime.isRunningTests else { return }
         sessionQueue.async {
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
@@ -131,6 +133,7 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func stopCapture() {
+        guard !AppRuntime.isRunningTests else { return }
         sessionQueue.async {
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
@@ -170,6 +173,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 // MARK: - Setup
 extension CameraManager {
     func setupBallDetection(with pose: PoseDetectionManager) {
+        guard !AppRuntime.isRunningTests else {
+            self.ballDetectionManager = nil
+            return
+        }
         // Live overlay prefers the freshest frame index (t=4)
         let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
         manager.onApex = { [weak self] in

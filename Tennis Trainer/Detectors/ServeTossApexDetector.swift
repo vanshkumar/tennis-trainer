@@ -24,11 +24,14 @@ final class ServeTossApexDetector {
 
     private var buffer: [Entry] = []
     private var lastBeep: CFTimeInterval = -.greatestFiniteMagnitude
+    private var nextCandidateIndex = 1
 
     func consume(
         samples: [GridTrackNetDetector.Sample],
         heightGateProvider: ServeTossApexHeightGateProviding?
     ) -> Bool {
+        var didFire = false
+
         for sample in samples {
             guard
                 let position = sample.position,
@@ -55,45 +58,54 @@ final class ServeTossApexDetector {
         }
 
         let cutoff = newestTimestamp - bufferHorizonSeconds
-        buffer.removeAll { $0.timestamp < cutoff }
+        let removedCount = buffer.prefix { $0.timestamp < cutoff }.count
+        if removedCount > 0 {
+            buffer.removeFirst(removedCount)
+            nextCandidateIndex = max(1, nextCandidateIndex - removedCount)
+        }
 
         guard buffer.count >= 3 else {
             return false
         }
 
-        let candidateIndex = buffer.count - 2
-        let previous = buffer[candidateIndex - 1]
-        let candidate = buffer[candidateIndex]
-        let next = buffer[candidateIndex + 1]
+        while nextCandidateIndex + 1 < buffer.count {
+            let previous = buffer[nextCandidateIndex - 1]
+            let candidate = buffer[nextCandidateIndex]
+            let next = buffer[nextCandidateIndex + 1]
+            nextCandidateIndex += 1
 
-        guard previous.y < candidate.y, next.y < candidate.y else {
-            return false
+            guard previous.y < candidate.y, next.y < candidate.y else {
+                continue
+            }
+
+            let requiredHeight = if let baseline = heightGateProvider?.serveTossApexGateBaselineY {
+                baseline + poseHeightMargin
+            } else {
+                frameRelativeFallback
+            }
+
+            guard candidate.y > requiredHeight else {
+                continue
+            }
+
+            guard candidate.confidence >= confidenceThreshold else {
+                continue
+            }
+
+            guard candidate.timestamp - lastBeep >= cooldownSeconds else {
+                continue
+            }
+
+            lastBeep = candidate.timestamp
+            didFire = true
         }
 
-        let requiredHeight = if let baseline = heightGateProvider?.serveTossApexGateBaselineY {
-            baseline + poseHeightMargin
-        } else {
-            frameRelativeFallback
-        }
-
-        guard candidate.y > requiredHeight else {
-            return false
-        }
-
-        guard candidate.confidence >= confidenceThreshold else {
-            return false
-        }
-
-        guard candidate.timestamp - lastBeep >= cooldownSeconds else {
-            return false
-        }
-
-        lastBeep = candidate.timestamp
-        return true
+        return didFire
     }
 
     func reset() {
         buffer.removeAll(keepingCapacity: true)
         lastBeep = -.greatestFiniteMagnitude
+        nextCandidateIndex = 1
     }
 }

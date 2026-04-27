@@ -7,6 +7,7 @@ class AudioManager: ObservableObject {
     private var beepBuffer: AVAudioPCMBuffer?
     
     init() {
+        guard !AppRuntime.isRunningTests else { return }
         setupAudio()
     }
     

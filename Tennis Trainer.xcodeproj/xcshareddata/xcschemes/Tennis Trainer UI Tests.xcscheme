@@ -35,9 +35,9 @@
             parallelizable = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "0B2C8A492E5651D7002969CF"
-               BuildableName = "Tennis TrainerTests.xctest"
-               BlueprintName = "Tennis TrainerTests"
+               BlueprintIdentifier = "0B2C8A532E5651D7002969CF"
+               BuildableName = "Tennis TrainerUITests.xctest"
+               BlueprintName = "Tennis TrainerUITests"
                ReferencedContainer = "container:Tennis Trainer.xcodeproj">
             </BuildableReference>
          </TestableReference>
