@@ -2,6 +2,7 @@ import Foundation
 import CoreVideo
 import CoreGraphics
 import QuartzCore
+import ImageIO
 
 class BallDetectionManager: ObservableObject {
     @Published var ballPosition: CGPoint? // Vision-normalized (origin bottom-left)
@@ -33,17 +34,40 @@ class BallDetectionManager: ObservableObject {
         process(pixelBuffer: pixelBuffer, timestamp: CACurrentMediaTime())
     }
 
-    func process(pixelBuffer: CVPixelBuffer, timestamp: CFTimeInterval) {
+    func process(pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation) {
+        process(
+            pixelBuffer: pixelBuffer,
+            timestamp: CACurrentMediaTime(),
+            orientation: orientation
+        )
+    }
+
+    func process(
+        pixelBuffer: CVPixelBuffer,
+        timestamp: CFTimeInterval,
+        orientation: CGImagePropertyOrientation = .up
+    ) {
         switch AppConfig.ballDetectionMethod {
         case .colorKalman:
-            let pos = colorKalmanDetector.process(pixelBuffer: pixelBuffer, poseDetectionManager: poseDetectionManager)
+            let analysisBuffer = PixelBufferScaler.shared.copyApplyingOrientation(
+                pixelBuffer,
+                orientation: orientation
+            ) ?? pixelBuffer
+            let pos = colorKalmanDetector.process(
+                pixelBuffer: analysisBuffer,
+                poseDetectionManager: poseDetectionManager
+            )
             apexDetector.reset()
             DispatchQueue.main.async { self.ballPosition = pos }
 
         case .gridTrackNet:
             // Feed frames on caller thread (as before), and only offload inference.
             colorKalmanDetector.reset()
-            gridTrackNetDetector.pushFrame(pixelBuffer, timestamp: timestamp)
+            gridTrackNetDetector.pushFrame(
+                pixelBuffer,
+                timestamp: timestamp,
+                orientation: orientation
+            )
 
             detectionQueue.async { [weak self] in
                 guard let self = self else { return }

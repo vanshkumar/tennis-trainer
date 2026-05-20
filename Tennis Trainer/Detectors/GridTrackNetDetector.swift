@@ -3,6 +3,7 @@ import CoreML
 import CoreVideo
 import CoreGraphics
 import QuartzCore
+import ImageIO
 
 final class GridTrackNetDetector {
     // MARK: - Types
@@ -19,6 +20,35 @@ final class GridTrackNetDetector {
         let confidence: Float    // best grid confidence at t
     }
 
+    private struct FrameMapping {
+        let sourceWidth: Float32
+        let sourceHeight: Float32
+        let scale: Float32
+        let offsetX: Float32
+        let offsetY: Float32
+
+        func sourceNormalizedPoint(modelX: Float32, modelYFromTop: Float32) -> CGPoint? {
+            let sourceX = (modelX - offsetX) / scale
+            let sourceYFromTop = (modelYFromTop - offsetY) / scale
+
+            guard
+                sourceX >= 0,
+                sourceX <= sourceWidth,
+                sourceYFromTop >= 0,
+                sourceYFromTop <= sourceHeight
+            else {
+                return nil
+            }
+
+            let xNorm = CGFloat(sourceX / sourceWidth)
+            let yNorm = CGFloat(1.0 - (sourceYFromTop / sourceHeight))
+            return CGPoint(
+                x: min(max(xNorm, 0.0), 1.0),
+                y: min(max(yNorm, 0.0), 1.0)
+            )
+        }
+    }
+
     // MARK: - Model
     private var model: GridTrackNet5?
     /// Target frame within the 5-frame window [0..4].
@@ -29,6 +59,7 @@ final class GridTrackNetDetector {
     // MARK: - Frame Buffer (oldest → newest)
     private var frames: [CVPixelBuffer] = []
     private var times: [CFTimeInterval] = []
+    private var frameMappings: [FrameMapping] = []
     private let sync = DispatchQueue(label: "ml.gridtracknet.detector")
     private var inferCount: Int = 0
     // Mapping: height=27 (rows), width=48 (cols) — per thesis.
@@ -52,21 +83,76 @@ final class GridTrackNetDetector {
         sync.sync {
             frames.removeAll(keepingCapacity: true)
             times.removeAll(keepingCapacity: true)
+            frameMappings.removeAll(keepingCapacity: true)
         }
     }
 
-    func pushFrame(_ pixelBuffer: CVPixelBuffer, timestamp: CFTimeInterval = CACurrentMediaTime()) {
+    func pushFrame(
+        _ pixelBuffer: CVPixelBuffer,
+        timestamp: CFTimeInterval = CACurrentMediaTime(),
+        orientation: CGImagePropertyOrientation = .up
+    ) {
         sync.sync {
-            let w = CVPixelBufferGetWidth(pixelBuffer)
-            let h = CVPixelBufferGetHeight(pixelBuffer)
+            guard let orientedBuffer = PixelBufferScaler.shared.copyApplyingOrientation(
+                pixelBuffer,
+                orientation: orientation
+            ) else {
+                print("GridTrackNetDetector: failed to orient frame; skipping.")
+                return
+            }
+
+            let w = CVPixelBufferGetWidth(orientedBuffer)
+            let h = CVPixelBufferGetHeight(orientedBuffer)
             let targetW = 768
             let targetH = 432
             let bufferToAppend: CVPixelBuffer
+            let mapping: FrameMapping
+
             if w == targetW && h == targetH {
-                bufferToAppend = pixelBuffer
+                bufferToAppend = orientedBuffer
+                mapping = FrameMapping(
+                    sourceWidth: Float32(w),
+                    sourceHeight: Float32(h),
+                    scale: 1.0,
+                    offsetX: 0.0,
+                    offsetY: 0.0
+                )
             } else {
-                if let resized = PixelBufferScaler.shared.resizeAspectFill(pixelBuffer, width: targetW, height: targetH) {
+                let isPortraitSource = h > w
+                let scale: CGFloat
+                let offsetX: CGFloat
+                let offsetY: CGFloat
+                let resized: CVPixelBuffer?
+
+                if isPortraitSource {
+                    scale = min(CGFloat(targetW) / CGFloat(w), CGFloat(targetH) / CGFloat(h))
+                    offsetX = (CGFloat(targetW) - CGFloat(w) * scale) * 0.5
+                    offsetY = (CGFloat(targetH) - CGFloat(h) * scale) * 0.5
+                    resized = PixelBufferScaler.shared.resizeAspectFit(
+                        orientedBuffer,
+                        width: targetW,
+                        height: targetH
+                    )
+                } else {
+                    scale = max(CGFloat(targetW) / CGFloat(w), CGFloat(targetH) / CGFloat(h))
+                    offsetX = -(CGFloat(w) * scale - CGFloat(targetW)) * 0.5
+                    offsetY = -(CGFloat(h) * scale - CGFloat(targetH)) * 0.5
+                    resized = PixelBufferScaler.shared.resizeAspectFill(
+                        orientedBuffer,
+                        width: targetW,
+                        height: targetH
+                    )
+                }
+
+                if let resized = resized {
                     bufferToAppend = resized
+                    mapping = FrameMapping(
+                        sourceWidth: Float32(w),
+                        sourceHeight: Float32(h),
+                        scale: Float32(scale),
+                        offsetX: Float32(offsetX),
+                        offsetY: Float32(offsetY)
+                    )
                 } else {
                     print("GridTrackNetDetector: failed to resize frame (\(w)x\(h)) → (\(targetW)x\(targetH)); skipping.")
                     return
@@ -77,6 +163,8 @@ final class GridTrackNetDetector {
             frames.append(bufferToAppend)
             if times.count == 5 { times.removeFirst() }
             times.append(timestamp)
+            if frameMappings.count == 5 { frameMappings.removeFirst() }
+            frameMappings.append(mapping)
         }
     }
 
@@ -87,7 +175,7 @@ final class GridTrackNetDetector {
     // MARK: - Inference (raw tensors only)
     func predictIfReady() -> RawOutputs? {
         return sync.sync { () -> RawOutputs? in
-            guard frames.count == 5, let model = model else { return nil }
+            guard frames.count == 5, frameMappings.count == 5, let model = model else { return nil }
             do {
                 let provider = try MLDictionaryFeatureProvider(dictionary: [
                     "f1": MLFeatureValue(pixelBuffer: frames[0]),
@@ -221,19 +309,9 @@ final class GridTrackNetDetector {
         let xPx = (Float32(bc) + f16(xBits[idxWithStrides(xStrides, t, br, bc)])) * stepX
         let yPx = (Float32(br) + f16(yBits[idxWithStrides(yStrides, t, br, bc)])) * stepY
 
-        var xNorm = CGFloat(xPx / 768.0)
-        let yNormTop = CGFloat(yPx / 432.0)
-        // Convert to Vision-style bottom-left origin
-        var yNorm = 1.0 - yNormTop
-
-        
-
-        // Clamp to [0,1]
-        xNorm = min(max(xNorm, 0.0), 1.0)
-        yNorm = min(max(yNorm, 0.0), 1.0)
-
-        
-        return CGPoint(x: xNorm, y: yNorm)
+        let mappings = sync.sync { frameMappings }
+        guard t < mappings.count else { return nil }
+        return mappings[t].sourceNormalizedPoint(modelX: xPx, modelYFromTop: yPx)
     }
 
     // Decode positions for all 5 frame indices from a single inference.
@@ -308,8 +386,9 @@ final class GridTrackNetDetector {
         let stepY: Float32 = 432.0 / Float32(gridH)
         let threshold: Float32 = 0.5
 
-        // Snapshot timestamps under lock
+        // Snapshot timestamps and source-frame mappings under lock
         let ts: [CFTimeInterval] = sync.sync { times }
+        let mappings: [FrameMapping] = sync.sync { frameMappings }
 
         var samples: [Sample] = []
         for t in 0..<5 {
@@ -326,11 +405,9 @@ final class GridTrackNetDetector {
             if best >= threshold {
                 let xPx = (Float32(bc) + f16(xBits[idxWithStrides(xStrides, t, br, bc)])) * stepX
                 let yPx = (Float32(br) + f16(yBits[idxWithStrides(yStrides, t, br, bc)])) * stepY
-                let xNorm = CGFloat(xPx / 768.0)
-                let yNorm = CGFloat(1.0 - (yPx / 432.0))
-                var xn = min(max(xNorm, 0.0), 1.0)
-                var yn = min(max(yNorm, 0.0), 1.0)
-                pos = CGPoint(x: xn, y: yn)
+                if t < mappings.count {
+                    pos = mappings[t].sourceNormalizedPoint(modelX: xPx, modelYFromTop: yPx)
+                }
             }
 
             let time = (t < ts.count) ? ts[t] : CACurrentMediaTime()

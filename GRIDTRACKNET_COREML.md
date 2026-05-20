@@ -45,6 +45,7 @@ Pixel mapping (per frame index `t`):
 Resizing
 - Camera frames like 1920×1080 must be resized to 768×432 before prediction (same 16:9 aspect).
 - Use Core Image (`CILanczosScaleTransform`) or vImage; avoid letterboxing so behavior matches the repo.
+- App note: portrait-oriented sources are first orientation-normalized, then fit into the 768×432 canvas to preserve the full toss arc. Decoded coordinates are mapped back to the oriented source frame.
 
 ## Swift Usage (Core ML directly)
 ```swift

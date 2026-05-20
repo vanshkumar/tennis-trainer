@@ -66,6 +66,15 @@ The repository is now aligned around the serve-training product:
 
 ## Detection Boundaries
 
+### Orientation
+
+- The app is portrait-only for the current v1 capture/playback experience.
+- Portrait capture makes it easier to keep the full serve toss in frame.
+- Pose and ball detection should consume the same oriented frame space in playback.
+- Portrait frames are fit into the GridTrackNet model canvas to preserve the toss arc, and decoded ball positions are mapped back to the oriented source frame.
+- `CameraPreview` keeps the live preview layer aligned to the active interface orientation.
+- Re-enabling landscape should include crop-aware overlay mapping and explicit playback fill/framing validation.
+
 ### Pose
 
 - Implemented with `VNDetectHumanBodyPoseRequest`.
@@ -76,7 +85,7 @@ The repository is now aligned around the serve-training product:
 
 - Backend is selected by `AppConfig.ballDetectionMethod`.
 - Default path is `gridTrackNet`.
-- `GridTrackNetDetector` keeps a 5-frame temporal window and emits one decoded sample per frame index.
+- `GridTrackNetDetector` keeps a 5-frame temporal window, applies caller-provided frame orientation, and emits one decoded sample per frame index.
 - `BallDetectionManager.onBallTrack` remains the seam for higher-level detectors.
 - `ServeTossApexDetector` is the first consumer wired onto that seam and emits the live cue through `BallDetectionManager.onApex`.
 

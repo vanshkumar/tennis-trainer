@@ -99,7 +99,11 @@ class VideoPlayerManager: ObservableObject {
         let orientation = getVideoOrientation()
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
         let ts = CMTimeGetSeconds(currentTime)
-        ballDetectionManager?.process(pixelBuffer: pixelBuffer, timestamp: ts)
+        ballDetectionManager?.process(
+            pixelBuffer: pixelBuffer,
+            timestamp: ts,
+            orientation: orientation
+        )
 
         DispatchQueue.main.async {
             self.onFrameProcessed?()
@@ -200,8 +204,8 @@ class VideoPlayerManager: ObservableObject {
     }
 
     func setupBallDetection(with pose: PoseDetectionManager) {
-        // Video overlay can favor stability (t=2, default)
-        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 2)
+        // Video overlay favors the freshest frame to avoid visible lag.
+        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
         manager.onApex = { [weak self] in
             self?.onApex?()
         }

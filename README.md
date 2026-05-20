@@ -19,6 +19,7 @@ What's next:
 
 Current scope:
 - Solo serve practice. Right-handed only for now.
+- Portrait orientation only for now, so the full toss is easier to keep in frame.
 - Recommended camera placement: side-on, toss-arm side. Behind-the-player still works for the toss apex but won't carry forward to richer cues.
 
 Status: work in progress. The active beep cue in the codebase is the serve toss apex described above; see `PRD.MD` for the current behavior and `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` for the parked forehand heuristic.

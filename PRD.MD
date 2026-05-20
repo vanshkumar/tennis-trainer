@@ -23,10 +23,12 @@ SwiftUI iOS app that provides on-device pose and ball detection for tennis. Two 
 - `nose` and `neck` provide the pose-relative height gate used by the toss-apex detector.
 
 ### Ball — GridTrackNet (default)
-- 5-frame model. Inputs: RGB 768×432 (resized aspect-fill, no letterbox), frames ordered oldest → newest.
+- 5-frame model. Inputs: RGB 768×432, frames ordered oldest → newest. Landscape-ish frames use aspect-fill; portrait frames use aspect-fit to preserve the full toss arc.
+- Live camera and video playback pass the same display orientation into pose and ball analysis so the two detection paths operate in the same frame space.
+- Portrait source frames are orientation-normalized and fit into the model canvas to preserve the full toss arc; decoded ball coordinates are mapped back into the oriented source-frame coordinate space.
 - Outputs: `conf`, `x_off`, `y_off` shaped `[5, 48 (W), 27 (H)]`; FP16.
 - Decoding (per `t`): argmax on `conf[t,:,:]` → `(row, col)`; pixel `x = (col + x_off) * 16`, `y = (row + y_off) * 16`; normalized to 768×432; threshold 0.5.
-- Live mode renders the freshest frame index (`t = 4`); video mode renders the middle (`t = 2`) for lower jitter.
+- Live and video overlay rendering use the freshest frame index (`t = 4`) to avoid visible lag.
 - All five samples per inference are emitted with timestamps via `BallDetectionManager.onBallTrack` for downstream consumers (e.g., the toss-apex detector).
 - See `GRIDTRACKNET_COREML.md` for full model I/O and conversion details.
 
@@ -51,6 +53,8 @@ SwiftUI iOS app that provides on-device pose and ball detection for tennis. Two 
 Synthesizes an ~800 Hz, ~0.2 s beep via `AVAudioEngine` / `AVAudioPlayerNode` (category `.playAndRecord`, defaults to speaker, Bluetooth allowed). Beep plays when the active cue fires.
 
 ## Camera placement
+The app supports portrait orientation only in v1. This makes it easier to keep the full toss in frame. Portrait playback must keep pose and ball detection in the same oriented frame space; fitted playback may still need crop-aware overlay work later.
+
 **Recommended**: side-on, on the toss-arm side of the player (i.e., for a right-handed server, the camera sits to the player's right). This view captures toss arc, trophy position, and contact in 2D.
 
 Behind-the-player framing also works for the toss apex cue specifically (the ball still goes up and comes down) but loses depth/lateral information needed for trophy and contact cues, so it isn't recommended going forward. Per-stroke "camera modes" with different recommended placements are anticipated as future work.
@@ -67,7 +71,7 @@ Behind-the-player framing also works for the toss apex cue specifically (the bal
 - **Stroke**: serve only.
 - **Handedness**: right-handed only.
 - **Practice mode**: solo. No rally gating; the ball detector assumes the only ball motion of interest is the player's own toss.
-- **Setup**: phone on a tripod, side-on framing as above, full body in frame, ball clearly visible against a non-busy background.
+- **Setup**: phone in portrait on a tripod, side-on framing as above, full body and toss arc in frame, ball clearly visible against a non-busy background.
 
 ## Roadmap (future work)
 - **Trophy position** cue: detect the loaded trophy moment (right elbow above shoulder, racket dropped behind back as a wrist-below-elbow proxy since the racket isn't tracked). Builds on the same pose seam as toss apex.

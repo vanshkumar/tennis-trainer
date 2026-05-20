@@ -161,8 +161,9 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     }
     
     private func processFrame(pixelBuffer: CVPixelBuffer) {
-        poseDetectionManager?.detectPose(in: pixelBuffer)
-        ballDetectionManager?.process(pixelBuffer: pixelBuffer)
+        let orientation = CGImagePropertyOrientation.right
+        poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
+        ballDetectionManager?.process(pixelBuffer: pixelBuffer, orientation: orientation)
 
         DispatchQueue.main.async {
             self.onFrameProcessed?()
