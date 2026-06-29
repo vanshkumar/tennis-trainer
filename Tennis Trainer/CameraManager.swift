@@ -8,7 +8,11 @@ class CameraManager: NSObject, ObservableObject {
     
     private let captureSession = AVCaptureSession()
     private var videoOutput = AVCaptureVideoDataOutput()
+    // Keep session lifecycle work responsive even when frame analysis is expensive.
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
+    private let videoProcessingQueue = DispatchQueue(label: "camera.video.processing.queue", qos: .userInitiated)
+    private let frameProcessingLock = NSLock()
+    private var frameProcessingEnabled = false
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
     var poseDetectionManager: PoseDetectionManager?
@@ -93,7 +97,7 @@ class CameraManager: NSObject, ObservableObject {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         
-        videoOutput.setSampleBufferDelegate(self, queue: sessionQueue)
+        videoOutput.setSampleBufferDelegate(self, queue: videoProcessingQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
     }
     
@@ -122,24 +126,28 @@ class CameraManager: NSObject, ObservableObject {
     
     func startCapture() {
         guard !AppRuntime.isRunningTests else { return }
+        setFrameProcessingEnabled(true)
+        DispatchQueue.main.async {
+            self.isRecording = true
+        }
+
         sessionQueue.async {
             if !self.captureSession.isRunning {
                 self.captureSession.startRunning()
-                DispatchQueue.main.async {
-                    self.isRecording = true
-                }
             }
         }
     }
     
     func stopCapture() {
         guard !AppRuntime.isRunningTests else { return }
+        setFrameProcessingEnabled(false)
+        DispatchQueue.main.async {
+            self.isRecording = false
+        }
+
         sessionQueue.async {
             if self.captureSession.isRunning {
                 self.captureSession.stopRunning()
-                DispatchQueue.main.async {
-                    self.isRecording = false
-                }
             }
         }
     }
@@ -151,10 +159,24 @@ class CameraManager: NSObject, ObservableObject {
         }
         return previewLayer!
     }
+
+    private func setFrameProcessingEnabled(_ enabled: Bool) {
+        frameProcessingLock.lock()
+        defer { frameProcessingLock.unlock() }
+        frameProcessingEnabled = enabled
+    }
+
+    private func canProcessFrame() -> Bool {
+        frameProcessingLock.lock()
+        defer { frameProcessingLock.unlock() }
+        let enabled = frameProcessingEnabled
+        return enabled
+    }
 }
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard canProcessFrame() else { return }
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         processFrame(pixelBuffer: pixelBuffer)
@@ -163,8 +185,10 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     private func processFrame(pixelBuffer: CVPixelBuffer) {
         let orientation = CGImagePropertyOrientation.right
         poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
+        guard canProcessFrame() else { return }
         ballDetectionManager?.process(pixelBuffer: pixelBuffer, orientation: orientation)
 
+        guard canProcessFrame() else { return }
         DispatchQueue.main.async {
             self.onFrameProcessed?()
         }
