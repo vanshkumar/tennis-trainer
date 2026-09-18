@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-18 — Xcode Cloud manifest**
+- Observation: `Tennis Trainer.xcodeproj/xcshareddata/xcodecloud/manifest.json` records project and target IDs, but does not define workflow triggers or TestFlight distribution.
+- Action: Use the manifest for target association; continue checking Xcode Cloud workflow settings separately when verifying releases.
+- Confidence: high
+
 **2026-06-29 — Live camera stop responsiveness**
 - Observation: `CameraManager` previously used the same serial queue for `AVCaptureVideoDataOutput` frame callbacks and `AVCaptureSession` start/stop calls, so stop requests could wait behind expensive Vision/Core ML frame processing.
 - Action: Keep capture-session lifecycle work on a dedicated session queue, send frame analysis to a separate video-processing queue, and gate frame callbacks immediately when stop is requested.
