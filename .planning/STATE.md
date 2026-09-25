@@ -3,16 +3,16 @@ gsd_state_version: "1.0"
 current_phase: 01
 current_phase_name: Consistent Toss Cues
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-09-25T22:21:49.664Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-09-25T22:45:51.384Z"
 last_activity: 2026-09-25
 last_activity_desc: Phase 01 execution started
-state_head: 2e2f1b2a04bad69a4cc6f290932f06c6f33fc4e0
+state_head: 8ec2167bfa234f9d95961786ff1a03297f6fc2e6
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-09-25)
 ## Current Position
 
 Phase: 01 (Consistent Toss Cues) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-09-25 — Phase 01 execution started
 
@@ -56,6 +56,7 @@ Plan 01-01 is complete: source-time adapters and bounded pose/publication pass 2
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 01 P01 | 18min | 2 tasks | 9 files |
+| Phase 01 P02 | 19min | 3 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -69,6 +70,7 @@ Decisions are logged in PROJECT.md and preferences in config.json.
 - Keep measured audio latency distinct from callback time; numeric empirical acceptance bounds remain to be established before final scoring.
 - [Phase 01]: Idle resets reserve one clearing publication; model storage clears on the next worker, coalescing repeated resets.
 - [Phase 01]: Recheck generation after observable pose/ball effects and track callbacks because subscribers can reset synchronously.
+- [Phase 01]: First consumed estimates are authoritative, including missing and low-confidence positions; only the manager authorizes a new cue identity domain.
 
 ### Pending Todos
 
@@ -85,6 +87,6 @@ No milestone-close deferrals yet; product exclusions are recorded in PROJECT.md 
 
 ## Session Continuity
 
-Last session: 2026-09-25T22:21:49.656Z
-Stopped at: Completed 01-01-PLAN.md
+Last session: 2026-09-25T22:45:51.376Z
+Stopped at: Completed 01-02-PLAN.md
 Resume file: None

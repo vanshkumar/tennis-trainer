@@ -6,7 +6,7 @@
     {
       "number": "1",
       "name": "Consistent Toss Cues",
-      "status": "pending"
+      "status": "in_progress"
     },
     {
       "number": "2",
@@ -29,5 +29,5 @@
     "label": "Advance to the next step",
     "reason": "Phase 01 of 4 · 0% · executing"
   },
-  "updated_at": "2026-09-25T22:21:49.238Z"
+  "updated_at": "2026-09-25T22:45:51.037Z"
 }
