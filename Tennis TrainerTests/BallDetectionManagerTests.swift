@@ -3,6 +3,27 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class BallDetectionManagerTests: XCTestCase {
+  func testPreparedPixelsRemainOwned_WhenSourceIsMutated() throws {
+    var source: CVPixelBuffer?
+    XCTAssertEqual(CVPixelBufferCreate(nil, 768, 432, kCVPixelFormatType_32BGRA,
+      nil, &source), kCVReturnSuccess)
+    let pixels = try XCTUnwrap(source)
+    CVPixelBufferLockBaseAddress(pixels, [])
+    memset(CVPixelBufferGetBaseAddress(pixels), 42, CVPixelBufferGetDataSize(pixels))
+    CVPixelBufferUnlockBaseAddress(pixels, [])
+    let detector = GridTrackNetDetector()
+    detector.pushFrame(pixels, timestamp: 1, orientation: .up)
+    let retained = try XCTUnwrap(Mirror(reflecting: detector).children.first {
+      $0.label == "frames"
+    }?.value as? [CVPixelBuffer]).first!
+    CVPixelBufferLockBaseAddress(pixels, [])
+    memset(CVPixelBufferGetBaseAddress(pixels), 99, CVPixelBufferGetDataSize(pixels))
+    CVPixelBufferUnlockBaseAddress(pixels, [])
+    CVPixelBufferLockBaseAddress(retained, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(retained, .readOnly) }
+    XCTAssertEqual(CVPixelBufferGetBaseAddress(retained)!.load(as: UInt8.self), 42)
+  }
+
   private final class Scheduler {
     var jobs: [() -> Void] = []
     func enqueue(_ job: @escaping () -> Void) { jobs.append(job) }
