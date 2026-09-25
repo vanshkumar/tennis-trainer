@@ -32,6 +32,7 @@ final class BallDetectionManager: ObservableObject {
     }
     var publishPose: (PoseDetectionManager.FramePose) -> Void = { _ in }
     var reset: () -> Void = {}
+    var bufferDiagnostics: () -> GridTrackNetDetector.Diagnostics = { .init(ringCount: 0, uniquePreparedBufferCount: 0) }
     var worker: (@escaping () -> Void) -> Void
     var publication: (@escaping () -> Void) -> Void
   }
@@ -51,6 +52,8 @@ final class BallDetectionManager: ObservableObject {
     fileprivate(set) var leaseHighWater = 0
     fileprivate(set) var publicationHighWater = 0
     let pendingInputs = 0
+    fileprivate(set) var preparedRingCount = 0
+    fileprivate(set) var uniquePreparedBufferCount = 0
   }
 
   // The small scheduler state outlives an owner if a held scheduler retains a job.
@@ -118,7 +121,11 @@ final class BallDetectionManager: ObservableObject {
   var diagnostics: Diagnostics {
     state.lock.lock()
     defer { state.lock.unlock() }
-    return state.diagnostics
+    var value = state.diagnostics
+    let buffers = dependencies.bufferDiagnostics()
+    value.preparedRingCount = buffers.ringCount
+    value.uniquePreparedBufferCount = buffers.uniquePreparedBufferCount
+    return value
   }
 
   init(dependencies: Dependencies, overlayTIndex: Int = 4, initialSequence: UInt64 = 0) {
@@ -139,12 +146,13 @@ final class BallDetectionManager: ObservableObject {
     let grid = GridTrackNetDetector()
     let color = ColorKalmanBallDetector()
     let queue = DispatchQueue(label: "ml.ball.analysis", qos: .userInitiated)
-    return Dependencies(analyze: { input, _, framePose in
+    return Dependencies(analyze: { input, identity, framePose in
       switch AppConfig.ballDetectionMethod {
       case .gridTrackNet:
         color.reset()
-        grid.pushFrame(input.pixelBuffer, timestamp: CMTimeGetSeconds(input.sourceTime),
-                       orientation: input.orientation)
+        guard grid.pushFrame(input: input, identity: identity, pose: framePose) else {
+          return Analysis(samples: nil, position: nil)
+        }
         return Analysis(samples: grid.detectAllSamplesIfReady(), position: nil)
       case .colorKalman:
         guard let pixels = PixelBufferScaler.shared.copyApplyingOrientation(
@@ -157,6 +165,7 @@ final class BallDetectionManager: ObservableObject {
       pose?.extractPose(in: input.pixelBuffer, orientation: input.orientation, identity: identity)
         ?? .init(identity: identity, joints: [:])
     }, publishPose: { pose?.publish($0) }, reset: { grid.clear(); color.reset() },
+    bufferDiagnostics: { grid.diagnostics },
     worker: { queue.async(execute: $0) }, publication: { DispatchQueue.main.async(execute: $0) })
   }
 
@@ -194,7 +203,7 @@ final class BallDetectionManager: ObservableObject {
       if current {
         let extracted = dependencies.extractPose(input, owned.identity)
         // A mismatched pose is missing, never a substitute for this frame.
-        if extracted.identity == owned.identity { pose = extracted }
+        pose = AnalysisFrame.Metadata.associatedPose(extracted, identity: owned.identity)
         result = try? dependencies.analyze(input, owned.identity, pose)
       }
       if state.takeReset() { dependencies.reset() }

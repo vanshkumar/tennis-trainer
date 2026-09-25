@@ -14,7 +14,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
     private func sample(t: CFTimeInterval, y: CGFloat, conf: Float = 0.9) -> GridTrackNetDetector.Sample {
         GridTrackNetDetector.Sample(
             tIndex: 0,
-            timestamp: t,
+            metadata: AnalysisFixture.metadata(time: t),
             position: CGPoint(x: 0.5, y: y),
             confidence: conf
         )

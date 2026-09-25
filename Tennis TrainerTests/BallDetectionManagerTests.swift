@@ -1,27 +1,110 @@
 import XCTest
 import AVFoundation
+import CoreML
 @testable import Tennis_Trainer
 
 final class BallDetectionManagerTests: XCTestCase {
   func testPreparedPixelsRemainOwned_WhenSourceIsMutated() throws {
-    var source: CVPixelBuffer?
-    XCTAssertEqual(CVPixelBufferCreate(nil, 768, 432, kCVPixelFormatType_32BGRA,
-      nil, &source), kCVReturnSuccess)
-    let pixels = try XCTUnwrap(source)
-    CVPixelBufferLockBaseAddress(pixels, [])
-    memset(CVPixelBufferGetBaseAddress(pixels), 42, CVPixelBufferGetDataSize(pixels))
-    CVPixelBufferUnlockBaseAddress(pixels, [])
-    let detector = GridTrackNetDetector()
-    detector.pushFrame(pixels, timestamp: 1, orientation: .up)
-    let retained = try XCTUnwrap(Mirror(reflecting: detector).children.first {
-      $0.label == "frames"
-    }?.value as? [CVPixelBuffer]).first!
-    CVPixelBufferLockBaseAddress(pixels, [])
-    memset(CVPixelBufferGetBaseAddress(pixels), 99, CVPixelBufferGetDataSize(pixels))
-    CVPixelBufferUnlockBaseAddress(pixels, [])
-    CVPixelBufferLockBaseAddress(retained, .readOnly)
-    defer { CVPixelBufferUnlockBaseAddress(retained, .readOnly) }
-    XCTAssertEqual(CVPixelBufferGetBaseAddress(retained)!.load(as: UInt8.self), 42)
+    let source = try AnalysisFixture.pixels(sentinel: 42)
+    let identity = AnalysisFixture.identity(1)
+    let frame = try XCTUnwrap(AnalysisFrame.prepare(input: .init(pixelBuffer: source,
+      sourceTime: identity.sourceTime, orientation: .up, sourceID: identity.sourceID),
+      identity: identity, pose: .init(identity: identity, joints: [:])))
+    XCTAssertFalse(frame.pixels === source)
+    let before = AnalysisFixture.sentinel(frame.pixels)
+    AnalysisFixture.fill(source, 99)
+    XCTAssertEqual(AnalysisFixture.sentinel(frame.pixels), before)
+    XCTAssertNotEqual(AnalysisFixture.sentinel(frame.pixels), AnalysisFixture.sentinel(source))
+    XCTAssertEqual(frame.metadata.mapping.sourceNormalizedPoint(modelX: 384, modelYFromTop: 216),
+                   CGPoint(x: 0.5, y: 0.5))
+  }
+
+  func testWindowRetainsOriginalMetadata_WhenPredictionIsHeld() throws {
+    let entered = expectation(description: "predictor holds A")
+    let complete = expectation(description: "prediction completes")
+    let release = DispatchSemaphore(value: 0)
+    let outputs = try AnalysisFixture.outputs()
+    var captured: AnalysisFrame.Window?
+    var result: [GridTrackNetDetector.Sample]?
+    let detector = GridTrackNetDetector(predictor: { window in
+      captured = window
+      entered.fulfill()
+      release.wait()
+      return outputs
+    })
+    for i in 1...5 { try AnalysisFixture.push(i, into: detector) }
+    let original = try XCTUnwrap(detector.snapshot())
+    DispatchQueue.global().async {
+      result = detector.detectAllSamplesIfReady()
+      complete.fulfill()
+    }
+    wait(for: [entered], timeout: 5)
+    for i in 6...10 { try AnalysisFixture.push(i, into: detector, width: 432, height: 768, orientation: .down) }
+    release.signal()
+    wait(for: [complete], timeout: 5)
+    let held = try XCTUnwrap(captured)
+    let samples = try XCTUnwrap(result)
+    XCTAssertEqual(samples.count, 5)
+    for i in 0..<5 {
+      let a = original.frames[i]
+      let b = held.frames[i]
+      XCTAssertTrue(a.pixels === b.pixels)
+      XCTAssertEqual(AnalysisFixture.sentinel(a.pixels), AnalysisFixture.sentinel(b.pixels))
+      XCTAssertEqual(samples[i].metadata.identity, a.metadata.identity)
+      XCTAssertEqual(samples[i].metadata.sourceTime.value, a.metadata.sourceTime.value)
+      XCTAssertEqual(samples[i].metadata.sourceTime.timescale, 1000)
+      XCTAssertEqual(samples[i].metadata.rawSize, a.metadata.rawSize)
+      XCTAssertEqual(samples[i].metadata.orientedSize, a.metadata.orientedSize)
+      XCTAssertEqual(samples[i].metadata.orientation, .up)
+      XCTAssertEqual(samples[i].metadata.mapping, a.metadata.mapping)
+      XCTAssertEqual(samples[i].metadata.pose.baselineY, a.metadata.pose.baselineY)
+      XCTAssertEqual(try XCTUnwrap(samples[i].position).x, 0.5, accuracy: 0.001)
+      XCTAssertEqual(try XCTUnwrap(samples[i].position).y, 1 - 8.0 / 27, accuracy: 0.001)
+    }
+    XCTAssertEqual(detector.diagnostics.ringCount, 5)
+    XCTAssertEqual(detector.diagnostics.uniquePreparedBufferCount, 5)
+  }
+
+  func testNoPrediction_WhenWindowIsIncompleteOrMetadataInvalid() throws {
+    var calls = 0
+    let outputs = try AnalysisFixture.outputs()
+    let detector = GridTrackNetDetector(predictor: { _ in calls += 1; return outputs })
+    XCTAssertNil(detector.detectAllSamplesIfReady())
+    for i in 1...4 {
+      try AnalysisFixture.push(i, into: detector)
+      XCTAssertNil(detector.detectAllSamplesIfReady())
+    }
+    XCTAssertEqual(calls, 0)
+    try AnalysisFixture.push(5, into: detector)
+    let valid = try XCTUnwrap(detector.snapshot())
+    XCTAssertNotNil(detector.detectAllSamplesIfReady())
+    XCTAssertEqual(calls, 1)
+    for count in 0...4 { XCTAssertNil(AnalysisFrame.Window(Array(valid.frames.prefix(count)))) }
+    for time in [CMTime.invalid, .indefinite, .positiveInfinity, .negativeInfinity] {
+      let id = BallDetectionManager.FrameIdentity(sourceID: AnalysisFixture.source,
+        generation: AnalysisFixture.generation, sequence: 6, sourceTime: time)
+      XCTAssertFalse(detector.pushFrame(input: .init(pixelBuffer: try AnalysisFixture.pixels(),
+        sourceTime: time, orientation: .up, sourceID: id.sourceID), identity: id,
+        pose: .init(identity: id, joints: [:])))
+    }
+    for invalid in ["source", "generation", "sequence", "time", "geometry", "mapping"] {
+      var frames = valid.frames
+      let old = frames[4]
+      let id = BallDetectionManager.FrameIdentity(
+        sourceID: invalid == "source" ? UUID() : old.metadata.identity.sourceID,
+        generation: invalid == "generation" ? UUID() : old.metadata.identity.generation,
+        sequence: invalid == "sequence" ? 1 : 5,
+        sourceTime: invalid == "time" ? .zero : old.metadata.sourceTime)
+      let metadata = AnalysisFrame.Metadata(identity: id, sourceTime: id.sourceTime,
+        ingressTime: 1, rawSize: invalid == "geometry" ? .zero : old.metadata.rawSize,
+        orientedSize: old.metadata.orientedSize, orientation: .up,
+        mapping: invalid == "mapping" ? .init(sourceWidth: 768, sourceHeight: 432,
+          scale: .nan, offsetX: 0, offsetY: 0) : old.metadata.mapping,
+        pose: .init(identity: id, joints: [:]))
+      frames[4] = AnalysisFrame(pixels: old.pixels, metadata: metadata)
+      XCTAssertNil(AnalysisFrame.Window(frames), invalid)
+    }
+    XCTAssertEqual(calls, 1)
   }
 
   private final class Scheduler {
@@ -162,11 +245,11 @@ final class BallDetectionManagerTests: XCTestCase {
   }
 
   private func tracer(_ received: @escaping (BallDetectionManager.Input) -> Void) -> BallDetectionManager {
-    BallDetectionManager(dependencies: .init(analyze: { input, _, _ in
+    BallDetectionManager(dependencies: .init(analyze: { input, identity, pose in
       received(input)
       let t = CMTimeGetSeconds(input.sourceTime)
       let y = 0.5 + 0.4 * sin(.pi * (t - 10) / 0.99)
-      return .init(samples: [.init(tIndex: 4, timestamp: t,
+      return .init(samples: [.init(tIndex: 4, metadata: AnalysisFixture.metadata(identity: identity, pose: pose),
         position: CGPoint(x: 0.5, y: y), confidence: 0.9)], position: nil)
     }, worker: { $0() }, publication: { $0() }))
   }
@@ -404,5 +487,70 @@ final class BallDetectionManagerTests: XCTestCase {
     XCTAssertEqual(maximum, 1)
     publications.forEach { $0.run() }
     XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 0)
+  }
+}
+
+enum AnalysisFixture {
+  static let source = UUID()
+  static let generation = UUID()
+
+  static func identity(_ sequence: UInt64, time: CMTime? = nil) -> BallDetectionManager.FrameIdentity {
+    .init(sourceID: source, generation: generation, sequence: sequence,
+          sourceTime: time ?? CMTime(value: Int64(sequence) * 33, timescale: 1000))
+  }
+
+  static func metadata(time: Double = 0, identity: BallDetectionManager.FrameIdentity? = nil,
+                       pose: PoseDetectionManager.FramePose? = nil) -> AnalysisFrame.Metadata {
+    let id = identity ?? self.identity(UInt64(max(0, time) * 1_000_000) + 1,
+      time: CMTime(seconds: time, preferredTimescale: 1_000_000))
+    return .init(identity: id, sourceTime: id.sourceTime, ingressTime: 1,
+      rawSize: CGSize(width: 768, height: 432), orientedSize: CGSize(width: 768, height: 432),
+      orientation: .up, mapping: .init(sourceWidth: 768, sourceHeight: 432, scale: 1, offsetX: 0, offsetY: 0),
+      pose: pose ?? .init(identity: id, joints: [:]))
+  }
+
+  static func pixels(width: Int = 768, height: Int = 432, sentinel: UInt8 = 42) throws -> CVPixelBuffer {
+    var buffer: CVPixelBuffer?
+    XCTAssertEqual(CVPixelBufferCreate(nil, width, height, kCVPixelFormatType_32BGRA,
+      [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary, &buffer), kCVReturnSuccess)
+    let result = try XCTUnwrap(buffer)
+    fill(result, sentinel)
+    return result
+  }
+
+  static func fill(_ pixels: CVPixelBuffer, _ value: UInt8) {
+    CVPixelBufferLockBaseAddress(pixels, [])
+    let bytes = CVPixelBufferGetBaseAddress(pixels)!.assumingMemoryBound(to: UInt8.self)
+    for row in 0..<CVPixelBufferGetHeight(pixels) {
+      for col in 0..<CVPixelBufferGetWidth(pixels) {
+        let offset = row * CVPixelBufferGetBytesPerRow(pixels) + col * 4
+        bytes[offset] = value; bytes[offset + 1] = value; bytes[offset + 2] = value; bytes[offset + 3] = 255
+      }
+    }
+    CVPixelBufferUnlockBaseAddress(pixels, [])
+  }
+
+  static func sentinel(_ pixels: CVPixelBuffer) -> UInt8 {
+    CVPixelBufferLockBaseAddress(pixels, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(pixels, .readOnly) }
+    return CVPixelBufferGetBaseAddress(pixels)!.load(as: UInt8.self)
+  }
+
+  static func outputs() throws -> GridTrackNetDetector.RawOutputs {
+    let arrays = try (0..<3).map { _ in try MLMultiArray(shape: [5, 27, 48], dataType: .float16) }
+    for array in arrays {
+      for i in 0..<array.count { array[i] = 0 }
+    }
+    for t in 0..<5 { arrays[0][[NSNumber(value: t), 8, 24]] = 0.9 }
+    return .init(conf: arrays[0], xOff: arrays[1], yOff: arrays[2])
+  }
+
+  static func push(_ index: Int, into detector: GridTrackNetDetector, width: Int = 768,
+                   height: Int = 432, orientation: CGImagePropertyOrientation = .up) throws {
+    let id = identity(UInt64(index))
+    XCTAssertTrue(detector.pushFrame(input: .init(pixelBuffer: try pixels(width: width, height: height,
+      sentinel: UInt8(index * 10)), sourceTime: id.sourceTime, orientation: orientation, sourceID: source),
+      identity: id, pose: .init(identity: id, joints: [.nose: .init(
+        location: CGPoint(x: 0.5, y: CGFloat(index) / 20), confidence: 0.9)])))
   }
 }
