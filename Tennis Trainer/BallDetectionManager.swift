@@ -220,11 +220,6 @@ final class BallDetectionManager: ObservableObject {
     return true
   }
 
-  private final class HeightGate: ServeTossApexHeightGateProviding {
-    let serveTossApexGateBaselineY: CGFloat?
-    init(_ baseline: CGFloat?) { serveTossApexGateBaselineY = baseline }
-  }
-
   private func publish(_ result: Analysis?, pose: PoseDetectionManager.FramePose, lease: Lease) {
     // Serializes reset against the short effect batch, never against Vision/model work.
     // Recursive locking permits a UI/callback subscriber to invalidate synchronously.
@@ -240,7 +235,7 @@ final class BallDetectionManager: ObservableObject {
     if let samples = result?.samples {
       onBallTrack?(samples)
       guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
-      if apexDetector.consume(samples: samples, heightGateProvider: HeightGate(pose.baselineY)) {
+      if apexDetector.consume(samples: samples) {
         onApex?()
       }
     }

@@ -23,16 +23,14 @@ final class ServeTossApexDetectorTests: XCTestCase {
         let samples = [associatedSample(1, y: 0.5, baseline: 0.6),
                        associatedSample(2, y: 0.71, baseline: 0.6),
                        associatedSample(3, y: 0.5, baseline: 0.95)]
-        XCTAssertTrue(ServeTossApexDetector().consume(samples: samples,
-            heightGateProvider: StubHeightGateProvider(baselineY: 0.95)))
+        XCTAssertTrue(ServeTossApexDetector().consume(samples: samples))
     }
 
     func testNoCueUsesCandidatePose_WhenLaterNoseIsLower() {
         let samples = [associatedSample(1, y: 0.5, baseline: 0.95),
                        associatedSample(2, y: 0.71, baseline: 0.95),
                        associatedSample(3, y: 0.5, baseline: 0.6)]
-        XCTAssertFalse(ServeTossApexDetector().consume(samples: samples,
-            heightGateProvider: StubHeightGateProvider(baselineY: 0.6)))
+        XCTAssertFalse(ServeTossApexDetector().consume(samples: samples))
     }
 
     func testCueUsesFallback_WhenPoseIdentityMismatchesAboveThreshold() {
@@ -42,7 +40,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
             XCTAssertTrue(candidate.metadata.isValid)
             XCTAssertTrue(ServeTossApexDetector().consume(samples: [
                 associatedSample(1, y: 0.5, baseline: 0.95), candidate,
-                associatedSample(3, y: 0.5, baseline: 0.95)], heightGateProvider: nil))
+                associatedSample(3, y: 0.5, baseline: 0.95)]))
         }
     }
 
@@ -61,16 +59,16 @@ final class ServeTossApexDetectorTests: XCTestCase {
             let samples = [associatedSample(1, y: 0.5, baseline: 0.1),
                 associatedSample(2, y: peak, baseline: nose, confidence: confidence, neck: neck),
                 associatedSample(3, y: 0.5, baseline: 0.1)]
-            XCTAssertEqual(ServeTossApexDetector().consume(samples: samples, heightGateProvider: nil), expected)
+            XCTAssertEqual(ServeTossApexDetector().consume(samples: samples), expected)
         }
     }
 
     func testMissingCandidateNeverInheritsPose_AndDelayedPoseCannotReviseCandidate() {
         let detector = ServeTossApexDetector()
         XCTAssertFalse(detector.consume(samples: [associatedSample(1, y: 0.5, baseline: 0.1),
-            associatedSample(2, y: 0.65, baseline: nil)], heightGateProvider: nil))
+            associatedSample(2, y: 0.65, baseline: nil)]))
         XCTAssertFalse(detector.consume(samples: [associatedSample(2, y: 0.65, baseline: 0.1),
-            associatedSample(3, y: 0.5, baseline: 0.1)], heightGateProvider: nil))
+            associatedSample(3, y: 0.5, baseline: 0.1)]))
     }
 
     func testNoCue_WhenPoseIdentityMismatchesAtOrBelowFallback() {
@@ -81,16 +79,8 @@ final class ServeTossApexDetectorTests: XCTestCase {
                 XCTAssertTrue(candidate.metadata.isValid)
                 XCTAssertFalse(ServeTossApexDetector().consume(samples: [
                     associatedSample(1, y: 0.5, baseline: 0.1), candidate,
-                    associatedSample(3, y: 0.5, baseline: 0.1)], heightGateProvider: nil))
+                    associatedSample(3, y: 0.5, baseline: 0.1)]))
             }
-        }
-    }
-
-    private final class StubHeightGateProvider: ServeTossApexHeightGateProviding {
-        let serveTossApexGateBaselineY: CGFloat?
-
-        init(baselineY: CGFloat?) {
-            self.serveTossApexGateBaselineY = baselineY
         }
     }
 
@@ -106,7 +96,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
     private func runDetector(
         samples: [GridTrackNetDetector.Sample],
         batchSize: Int = 5,
-        provider: ServeTossApexHeightGateProviding? = nil
+        baseline: CGFloat? = nil
     ) -> [Int] {
         let detector = ServeTossApexDetector()
         var firingBatchIndices: [Int] = []
@@ -114,7 +104,15 @@ final class ServeTossApexDetectorTests: XCTestCase {
 
         for start in stride(from: 0, to: samples.count, by: batchSize) {
             let end = min(start + batchSize, samples.count)
-            if detector.consume(samples: Array(samples[start..<end]), heightGateProvider: provider) {
+            let batch = samples[start..<end].map { sample in
+                guard let baseline else { return sample }
+                let identity = sample.metadata.identity
+                return GridTrackNetDetector.Sample(tIndex: sample.tIndex,
+                    metadata: AnalysisFixture.metadata(identity: identity, pose: .init(identity: identity,
+                        joints: [.nose: .init(location: CGPoint(x: 0.5, y: baseline), confidence: 0.9)])),
+                    position: sample.position, confidence: sample.confidence)
+            }
+            if detector.consume(samples: batch) {
                 firingBatchIndices.append(batchIndex)
             }
             batchIndex += 1
@@ -183,7 +181,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
 
         let firings = runDetector(
             samples: samples,
-            provider: StubHeightGateProvider(baselineY: 0.95)
+            baseline: 0.95
         )
 
         XCTAssertTrue(firings.isEmpty)
