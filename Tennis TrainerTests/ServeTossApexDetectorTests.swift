@@ -4,6 +4,66 @@ import Vision
 @testable import Tennis_Trainer
 
 final class ServeTossApexDetectorTests: XCTestCase {
+    func testNoRevision_WhenFirstEstimateHasNoAcceptedPosition() {
+        for confidence in [Float(0.2), 0.9] {
+            let detector = ServeTossApexDetector()
+            let candidate = sample(t: 0.2, y: 0.9)
+            let missing = GridTrackNetDetector.Sample(tIndex: 0, metadata: candidate.metadata,
+                position: confidence < 0.5 ? candidate.position : nil, confidence: confidence)
+            XCTAssertFalse(detector.consume(samples: [missing]))
+            XCTAssertFalse(detector.consume(samples: [sample(t: 0.1, y: 0.5), candidate,
+                sample(t: 0.3, y: 0.5)]))
+        }
+    }
+
+    func testDenseHistoryRemainsBounded_WhenOneThousandWindowsOverlap() throws {
+        let detector = ServeTossApexDetector()
+        for end in 5...1004 {
+            let batch = (end - 4...end).map { sample(t: Double($0) / 100_000, y: 0.5) }
+            XCTAssertFalse(detector.consume(samples: batch))
+        }
+        let retained = try XCTUnwrap(Mirror(reflecting: detector).children.first {
+            $0.label == "buffer"
+        })
+        XCTAssertLessThanOrEqual(Mirror(reflecting: retained.value).children.count, 3)
+    }
+
+    func testHorizonBoundaryAndBatchPartition_PreserveEligibility() {
+        for end in [1.5, 1.500001] {
+            let batch = [sample(t: 0, y: 0.5), sample(t: 0.5, y: 0.9), sample(t: end, y: 0.5)]
+            let expected = end == 1.5
+            let together = ServeTossApexDetector()
+            XCTAssertEqual(together.consume(samples: batch), expected)
+            let split = ServeTossApexDetector()
+            XCTAssertFalse(split.consume(samples: Array(batch.prefix(2))))
+            XCTAssertEqual(split.consume(samples: [batch[2]]), expected)
+        }
+    }
+
+    func testNoCue_WhenEmptyPartialNoAcceptedPositionsOrTiedMaximum() {
+        XCTAssertFalse(ServeTossApexDetector().consume(samples: []))
+        for ys in [[CGFloat(0.9)], [0.5, 0.9], [0.5, 0.9, 0.9, 0.5]] {
+            XCTAssertFalse(ServeTossApexDetector().consume(samples: ys.enumerated().map {
+                sample(t: Double($0.offset) / 10, y: $0.element)
+            }))
+        }
+        XCTAssertFalse(ServeTossApexDetector().consume(samples: (0..<5).map {
+            sample(t: Double($0) / 10, y: 0.9, conf: 0.2)
+        }))
+    }
+
+    private func cooldown(_ separation: Double, expected: Bool) {
+        let detector = ServeTossApexDetector()
+        XCTAssertTrue(detector.consume(samples: [sample(t: 0, y: 0.5),
+            sample(t: 0.1, y: 0.9), sample(t: 0.2, y: 0.5)]))
+        XCTAssertEqual(detector.consume(samples: [sample(t: separation, y: 0.5),
+            sample(t: separation + 0.1, y: 0.9), sample(t: separation + 0.2, y: 0.5)]), expected)
+    }
+
+    func testCooldownBelowFourSeconds_RejectsSecondToss() { cooldown(3.999, expected: false) }
+    func testCooldownAtFourSeconds_AcceptsSecondToss() { cooldown(4, expected: true) }
+    func testCooldownAboveFourSeconds_AcceptsSecondToss() { cooldown(4.001, expected: true) }
+
     private func associatedSample(_ index: UInt64, y: CGFloat, baseline: CGFloat?,
                                   mismatch: String? = nil, confidence: Float = 0.9,
                                   neck: CGFloat? = nil) -> GridTrackNetDetector.Sample {
