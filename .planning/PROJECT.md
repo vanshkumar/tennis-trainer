@@ -101,6 +101,7 @@ No deadline, budget, or specific test-device requirement has been provided.
 | Keep portrait, right-handed solo practice | Limit variables while making the current cue dependable | — Retained constraint |
 | Defer additional serve cues and other strokes | Build on a dependable timing and geometry foundation | — Deferred |
 | Combine regression tests, repeatable clips, and device validation | Code inspection and synthetic tosses do not prove full-pipeline behavior | — Validation work pending |
+| Organize phases around complete user outcomes (MVP mode) | User approved vertical delivery and all 17 reliability requirements on 2026-09-25 | — Roadmap preparation |
 
 ## Evolution
 
@@ -119,4 +120,4 @@ After each milestone:
 3. Update Context with shipped behavior, measurements, and user feedback.
 
 ---
-*Last updated: 2026-09-24 after initial project scope approval*
+*Last updated: 2026-09-25 after requirements and vertical phase structure approval*
