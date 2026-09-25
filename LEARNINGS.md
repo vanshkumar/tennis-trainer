@@ -8,6 +8,16 @@
 
 ## Task Notes
 
+**2026-09-25 — Rational cue boundary fixtures**
+- Observation: Constructing the intended 4.1-second test timestamp with `CMTime(seconds:preferredTimescale:)` produced a value below the intended exact cooldown boundary; a seconds-based fixture obscured the distinction between a real rejection and rounding in test setup.
+- Action: Build exact cooldown, equality, and horizon fixtures with integer `CMTime(value:timescale:)` values. Assert consumed/evaluated counts separately from cue counts.
+- Confidence: high
+
+**2026-09-25 — Owned prediction windows**
+- Observation: The `.up`/768×432 preparation path retained the capture buffer directly; mutating its source changed the retained sentinel from 42 to 99. Allocating through the existing unit-scale resize path preserved the original pixels.
+- Action: Keep preparation allocation unconditional for retained model frames and pass the same five-record snapshot through prediction and decoding; never re-read ring metadata after prediction.
+- Confidence: high
+
 **2026-09-25 — Bounded analysis publication**
 - Observation: A track callback can synchronously reset its own `BallDetectionManager`; checking generation only when entering publication still allowed the pending apex callback to fire. The regression reproduces this without sleeps or model execution.
 - Action: Recheck generation after observable pose/ball updates and track callbacks; hold the lease through the entire effect batch. Coalesce idle resets into one clearing publication and defer model clearing to its worker.

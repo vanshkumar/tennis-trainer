@@ -3,6 +3,109 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class AnalysisAssociationTests: XCTestCase {
+  func testSlidingWindowsAndReplayAfterPruning_KeepBoundedManagerCueState() throws {
+    var history: [GridTrackNetDetector.Sample] = []
+    var original: [GridTrackNetDetector.Sample] = []
+    var replay = false
+    var cues = 0
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, identity, pose in
+      if replay { return .init(samples: original, position: nil) }
+      let item = GridTrackNetDetector.Sample(tIndex: 4,
+        metadata: AnalysisFixture.metadata(identity: identity, pose: pose),
+        position: CGPoint(x: 0.5, y: identity.sequence == 3 ? 0.9 : 0.5), confidence: 0.9)
+      if history.count == 5 { history.removeFirst() }
+      history.append(item)
+      if identity.sequence == 5 { original = history }
+      return .init(samples: history.count == 5 ? history : nil, position: nil)
+    }, worker: { $0() }, publication: { $0() }))
+    manager.onApex = { cues += 1 }
+    let pixels = try AnalysisFixture.pixels(width: 16, height: 16)
+    let source = UUID()
+    for index in 1...1004 {
+      XCTAssertTrue(manager.process(input: .init(pixelBuffer: pixels,
+        sourceTime: CMTime(value: Int64(index), timescale: 100), orientation: .up, sourceID: source)))
+      XCTAssertLessThanOrEqual(manager.cueDiagnostics.retainedEntryCount, 3)
+      if index < 5 { XCTAssertEqual(cues, 0) }
+    }
+    XCTAssertEqual(cues, 1)
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 1004)
+    XCTAssertEqual(manager.cueDiagnostics.evaluatedCandidateCount, 1002)
+    let before = manager.cueDiagnostics
+    replay = true
+    manager.process(input: .init(pixelBuffer: pixels, sourceTime: CMTime(value: 20, timescale: 1),
+      orientation: .up, sourceID: source))
+    XCTAssertEqual(manager.cueDiagnostics, before)
+    manager.resetTrackingState(sourceID: source)
+    manager.process(input: .init(pixelBuffer: pixels, sourceTime: .zero, orientation: .up, sourceID: source))
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 0)
+    XCTAssertEqual(cues, 1)
+  }
+
+  func testLaterPoseAndConfidentContextCannotReviseMissingCandidate_ThroughManager() throws {
+    var first: [GridTrackNetDetector.Sample] = []
+    var cues = 0
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, identity, pose in
+      let sample = GridTrackNetDetector.Sample(tIndex: 4,
+        metadata: AnalysisFixture.metadata(identity: identity, pose: pose),
+        position: identity.sequence == 2 ? nil : CGPoint(x: 0.5, y: 0.5), confidence: 0.9)
+      if identity.sequence <= 5 {
+        first.append(sample)
+        return .init(samples: first.count == 5 ? first : nil, position: nil)
+      }
+      let revised = first.map { previous in
+        let id = previous.metadata.identity
+        return GridTrackNetDetector.Sample(tIndex: 0,
+          metadata: AnalysisFixture.metadata(identity: id, pose: .init(identity: id,
+            joints: [.nose: .init(location: CGPoint(x: 0.5, y: 0.1), confidence: 0.9)])),
+          position: CGPoint(x: 0.5, y: id.sequence == 2 ? 0.9 : 0.5), confidence: 0.9)
+      }
+      return .init(samples: revised + [sample], position: nil)
+    }, worker: { $0() }, publication: { $0() }))
+    manager.onApex = { cues += 1 }
+    let source = UUID()
+    let pixels = try AnalysisFixture.pixels(width: 16, height: 16)
+    for index in 1...6 {
+      manager.process(input: .init(pixelBuffer: pixels, sourceTime: CMTime(value: Int64(index), timescale: 100),
+        orientation: .up, sourceID: source))
+    }
+    XCTAssertEqual(cues, 0)
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 6)
+  }
+
+  func testNoAutomaticCue_WhenRealWindowIsEmptyWarmingUpOrHasNoPositions() throws {
+    var predictions = 0
+    let outputs = try AnalysisFixture.outputs()
+    for index in 0..<outputs.conf.count { outputs.conf[index] = 0 }
+    let grid = GridTrackNetDetector(predictor: { _ in predictions += 1; return outputs })
+    var cues = 0
+    let manager = BallDetectionManager(dependencies: .init(analyze: { input, identity, pose in
+      guard grid.pushFrame(input: input, identity: identity, pose: pose) else {
+        return .init(samples: nil, position: nil)
+      }
+      return .init(samples: grid.detectAllSamplesIfReady(), position: nil)
+    }, reset: grid.clear, bufferDiagnostics: { grid.diagnostics },
+    worker: { $0() }, publication: { $0() }))
+    manager.onApex = { cues += 1 }
+    XCTAssertEqual(cues, 0)
+    let source = UUID()
+    let pixels = try AnalysisFixture.pixels()
+    for index in 1...5 {
+      manager.process(input: .init(pixelBuffer: pixels, sourceTime: CMTime(value: Int64(index), timescale: 30),
+        orientation: .up, sourceID: source))
+      XCTAssertEqual(predictions, index == 5 ? 1 : 0)
+      XCTAssertEqual(cues, 0)
+    }
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 5)
+    XCTAssertEqual(manager.cueDiagnostics.retainedEntryCount, 0)
+    XCTAssertEqual(manager.diagnostics.preparedRingCount, 5)
+    XCTAssertEqual(manager.diagnostics.uniquePreparedBufferCount, 5)
+    manager.resetTrackingState(sourceID: source)
+    manager.process(input: .init(pixelBuffer: pixels, sourceTime: .zero, orientation: .up, sourceID: source))
+    XCTAssertEqual(predictions, 1)
+    XCTAssertEqual(manager.diagnostics.preparedRingCount, 1)
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 0)
+  }
+
   private func run(peak: CGFloat = 0.71, candidate: CGFloat?, later: CGFloat?,
                    mismatch: String? = nil, confidence: Float = 0.9,
                    useNeck: Bool = false, extractionThrows: Bool = false) throws -> Int {

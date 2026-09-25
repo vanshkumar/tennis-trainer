@@ -134,6 +134,12 @@ final class BallDetectionManager: ObservableObject {
     state.sequence = initialSequence
   }
 
+  var cueDiagnostics: ServeTossApexDetector.CueDiagnostics {
+    state.lock.lock()
+    defer { state.lock.unlock() }
+    return apexDetector.diagnostics
+  }
+
   convenience init(poseDetectionManager: PoseDetectionManager?, overlayTIndex: Int = 2,
                    dependencies: Dependencies? = nil,
                    productionFactory: ((PoseDetectionManager?) -> Dependencies)? = nil) {
@@ -228,6 +234,7 @@ final class BallDetectionManager: ObservableObject {
     guard state.lease?.id == lease.id else { return }
     State.increment(&state.diagnostics.completed)
     guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    apexDetector.reset(sourceID: lease.identity.sourceID, generation: lease.identity.generation)
     dependencies.publishPose(pose)
     guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
     ballPosition = result?.samples?.first { $0.tIndex == overlayTIndex }?.position ?? result?.position
@@ -244,7 +251,7 @@ final class BallDetectionManager: ObservableObject {
   }
 
   private func clearPublishedValues() {
-    apexDetector.reset()
+    apexDetector.reset(sourceID: state.sourceID ?? compatibilitySourceID, generation: state.generation)
     ballPosition = nil
     dependencies.publishPose(.init(identity: FrameIdentity(sourceID: state.sourceID ?? compatibilitySourceID,
       generation: state.generation, sequence: 0, sourceTime: .invalid), joints: [:]))

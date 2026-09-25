@@ -6,7 +6,7 @@ import Vision
 final class ServeTossApexDetectorTests: XCTestCase {
     func testNoRevision_WhenFirstEstimateHasNoAcceptedPosition() {
         for confidence in [Float(0.2), 0.9] {
-            let detector = ServeTossApexDetector()
+            let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
             let candidate = sample(t: 0.2, y: 0.9)
             let missing = GridTrackNetDetector.Sample(tIndex: 0, metadata: candidate.metadata,
                 position: confidence < 0.5 ? candidate.position : nil, confidence: confidence)
@@ -17,52 +17,127 @@ final class ServeTossApexDetectorTests: XCTestCase {
     }
 
     func testDenseHistoryRemainsBounded_WhenOneThousandWindowsOverlap() throws {
-        let detector = ServeTossApexDetector()
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
         for end in 5...1004 {
             let batch = (end - 4...end).map { sample(t: Double($0) / 100_000, y: 0.5) }
             XCTAssertFalse(detector.consume(samples: batch))
         }
-        let retained = try XCTUnwrap(Mirror(reflecting: detector).children.first {
-            $0.label == "buffer"
-        })
-        XCTAssertLessThanOrEqual(Mirror(reflecting: retained.value).children.count, 3)
+        XCTAssertLessThanOrEqual(detector.diagnostics.retainedEntryCount, 3)
+        XCTAssertEqual(detector.diagnostics.consumedCount, 1004)
+        XCTAssertEqual(detector.diagnostics.evaluatedCandidateCount, 1002)
+        XCTAssertEqual(detector.diagnostics.emittedCount, 0)
     }
 
     func testHorizonBoundaryAndBatchPartition_PreserveEligibility() {
         for end in [1.5, 1.500001] {
             let batch = [sample(t: 0, y: 0.5), sample(t: 0.5, y: 0.9), sample(t: end, y: 0.5)]
             let expected = end == 1.5
-            let together = ServeTossApexDetector()
+            let together = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
             XCTAssertEqual(together.consume(samples: batch), expected)
-            let split = ServeTossApexDetector()
+            let split = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
             XCTAssertFalse(split.consume(samples: Array(batch.prefix(2))))
             XCTAssertEqual(split.consume(samples: [batch[2]]), expected)
         }
     }
 
     func testNoCue_WhenEmptyPartialNoAcceptedPositionsOrTiedMaximum() {
-        XCTAssertFalse(ServeTossApexDetector().consume(samples: []))
+        XCTAssertFalse(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: []))
         for ys in [[CGFloat(0.9)], [0.5, 0.9], [0.5, 0.9, 0.9, 0.5]] {
-            XCTAssertFalse(ServeTossApexDetector().consume(samples: ys.enumerated().map {
+            XCTAssertFalse(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: ys.enumerated().map {
                 sample(t: Double($0.offset) / 10, y: $0.element)
             }))
         }
-        XCTAssertFalse(ServeTossApexDetector().consume(samples: (0..<5).map {
+        XCTAssertFalse(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: (0..<5).map {
             sample(t: Double($0) / 10, y: 0.9, conf: 0.2)
         }))
     }
 
-    private func cooldown(_ separation: Double, expected: Bool) {
-        let detector = ServeTossApexDetector()
-        XCTAssertTrue(detector.consume(samples: [sample(t: 0, y: 0.5),
-            sample(t: 0.1, y: 0.9), sample(t: 0.2, y: 0.5)]))
-        XCTAssertEqual(detector.consume(samples: [sample(t: separation, y: 0.5),
-            sample(t: separation + 0.1, y: 0.9), sample(t: separation + 0.2, y: 0.5)]), expected)
+    private func cooldown(_ separation: Int64, expected: Bool) {
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        func point(_ milliseconds: Int64, _ y: CGFloat) -> GridTrackNetDetector.Sample {
+            let id = AnalysisFixture.identity(UInt64(milliseconds) + 1,
+                time: CMTime(value: milliseconds, timescale: 1000))
+            return .init(tIndex: 0, metadata: AnalysisFixture.metadata(identity: id),
+                position: CGPoint(x: 0.5, y: y), confidence: 0.9)
+        }
+        XCTAssertTrue(detector.consume(samples: [point(0, 0.5), point(100, 0.9), point(200, 0.5)]))
+        XCTAssertEqual(detector.consume(samples: [point(separation, 0.5),
+            point(separation + 100, 0.9), point(separation + 200, 0.5)]), expected)
+        XCTAssertEqual(detector.diagnostics.consumedCount, 6)
+        XCTAssertEqual(detector.diagnostics.evaluatedCandidateCount, 2)
+        XCTAssertEqual(detector.diagnostics.emittedCount, expected ? 2 : 1)
     }
 
-    func testCooldownBelowFourSeconds_RejectsSecondToss() { cooldown(3.999, expected: false) }
-    func testCooldownAtFourSeconds_AcceptsSecondToss() { cooldown(4, expected: true) }
-    func testCooldownAboveFourSeconds_AcceptsSecondToss() { cooldown(4.001, expected: true) }
+    func testCooldownBelowFourSeconds_RejectsSecondToss() { cooldown(3999, expected: false) }
+    func testCooldownAtFourSeconds_AcceptsSecondToss() { cooldown(4000, expected: true) }
+    func testCooldownAboveFourSeconds_AcceptsSecondToss() { cooldown(4001, expected: true) }
+
+    func testReplayAfterPruning_DoesNotChangeConsumptionEvaluationOrEmission() {
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        let old = [sample(t: 0, y: 0.5), sample(t: 0.1, y: 0.9), sample(t: 0.2, y: 0.5)]
+        XCTAssertTrue(detector.consume(samples: old))
+        XCTAssertFalse(detector.consume(samples: [sample(t: 10, y: 0.5)]))
+        XCTAssertEqual(detector.diagnostics.retainedEntryCount, 1)
+        let before = detector.diagnostics
+        for _ in 0..<1000 {
+            XCTAssertFalse(detector.consume(samples: old))
+            XCTAssertFalse(detector.consume(samples: old.reversed()))
+        }
+        XCTAssertEqual(detector.diagnostics, before)
+        XCTAssertEqual(before.consumedCount, 4)
+        XCTAssertEqual(before.evaluatedCandidateCount, 1)
+        XCTAssertEqual(before.emittedCount, 1)
+    }
+
+    func testEqualRationalTimeAndOlderSequence_AreRejectedIndependently() {
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        let first = AnalysisFixture.identity(10, time: CMTime(value: 1, timescale: 2))
+        func value(_ id: BallDetectionManager.FrameIdentity) -> GridTrackNetDetector.Sample {
+            .init(tIndex: 0, metadata: AnalysisFixture.metadata(identity: id),
+                  position: CGPoint(x: 0.5, y: 0.9), confidence: 0.9)
+        }
+        XCTAssertFalse(detector.consume(samples: [value(first)]))
+        for id in [AnalysisFixture.identity(11, time: CMTime(value: 500, timescale: 1000)),
+                   AnalysisFixture.identity(9, time: CMTime(value: 1, timescale: 1)),
+                   AnalysisFixture.identity(12, time: .invalid),
+                   AnalysisFixture.identity(12, time: .positiveInfinity)] {
+            XCTAssertFalse(detector.consume(samples: [value(id)]))
+        }
+        XCTAssertEqual(detector.diagnostics.consumedCount, 1)
+    }
+
+    func testNewDomainRequiresExplicitReset_AndRejectsPreviousGeneration() {
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        let old = [sample(t: 0, y: 0.5), sample(t: 0.1, y: 0.9), sample(t: 0.2, y: 0.5)]
+        XCTAssertTrue(detector.consume(samples: old))
+        let newGeneration = UUID()
+        let fresh = old.map { sample in
+            let oldID = sample.metadata.identity
+            let id = BallDetectionManager.FrameIdentity(sourceID: oldID.sourceID, generation: newGeneration,
+                sequence: oldID.sequence, sourceTime: oldID.sourceTime)
+            return GridTrackNetDetector.Sample(tIndex: 0, metadata: AnalysisFixture.metadata(identity: id),
+                position: sample.position, confidence: sample.confidence)
+        }
+        let before = detector.diagnostics
+        XCTAssertFalse(detector.consume(samples: fresh))
+        detector.reset(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        XCTAssertEqual(detector.diagnostics, before)
+        detector.reset(sourceID: AnalysisFixture.source, generation: newGeneration)
+        XCTAssertFalse(detector.consume(samples: old))
+        XCTAssertEqual(detector.diagnostics.consumedCount, 0)
+        XCTAssertFalse(detector.consume(samples: Array(fresh.prefix(2))))
+        XCTAssertTrue(detector.consume(samples: [fresh[2]]))
+        XCTAssertEqual(detector.diagnostics.consumedCount, 3)
+    }
+
+    func testExpiredCandidatesAreNotEvaluatedRetrospectively_WhenBatchSpansHorizon() {
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
+        XCTAssertFalse(detector.consume(samples: [sample(t: 0, y: 0.5), sample(t: 0.1, y: 0.9),
+            sample(t: 0.2, y: 0.5), sample(t: 4, y: 0.5)]))
+        XCTAssertEqual(detector.diagnostics.consumedCount, 4)
+        XCTAssertEqual(detector.diagnostics.evaluatedCandidateCount, 0)
+        XCTAssertEqual(detector.diagnostics.retainedEntryCount, 1)
+    }
 
     private func associatedSample(_ index: UInt64, y: CGFloat, baseline: CGFloat?,
                                   mismatch: String? = nil, confidence: Float = 0.9,
@@ -83,14 +158,14 @@ final class ServeTossApexDetectorTests: XCTestCase {
         let samples = [associatedSample(1, y: 0.5, baseline: 0.6),
                        associatedSample(2, y: 0.71, baseline: 0.6),
                        associatedSample(3, y: 0.5, baseline: 0.95)]
-        XCTAssertTrue(ServeTossApexDetector().consume(samples: samples))
+        XCTAssertTrue(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: samples))
     }
 
     func testNoCueUsesCandidatePose_WhenLaterNoseIsLower() {
         let samples = [associatedSample(1, y: 0.5, baseline: 0.95),
                        associatedSample(2, y: 0.71, baseline: 0.95),
                        associatedSample(3, y: 0.5, baseline: 0.6)]
-        XCTAssertFalse(ServeTossApexDetector().consume(samples: samples))
+        XCTAssertFalse(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: samples))
     }
 
     func testCueUsesFallback_WhenPoseIdentityMismatchesAboveThreshold() {
@@ -98,7 +173,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
             let candidate = associatedSample(2, y: 0.71, baseline: 0.95, mismatch: mismatch)
             XCTAssertTrue(candidate.metadata.pose.joints.isEmpty)
             XCTAssertTrue(candidate.metadata.isValid)
-            XCTAssertTrue(ServeTossApexDetector().consume(samples: [
+            XCTAssertTrue(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: [
                 associatedSample(1, y: 0.5, baseline: 0.95), candidate,
                 associatedSample(3, y: 0.5, baseline: 0.95)]))
         }
@@ -119,12 +194,12 @@ final class ServeTossApexDetectorTests: XCTestCase {
             let samples = [associatedSample(1, y: 0.5, baseline: 0.1),
                 associatedSample(2, y: peak, baseline: nose, confidence: confidence, neck: neck),
                 associatedSample(3, y: 0.5, baseline: 0.1)]
-            XCTAssertEqual(ServeTossApexDetector().consume(samples: samples), expected)
+            XCTAssertEqual(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: samples), expected)
         }
     }
 
     func testMissingCandidateNeverInheritsPose_AndDelayedPoseCannotReviseCandidate() {
-        let detector = ServeTossApexDetector()
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
         XCTAssertFalse(detector.consume(samples: [associatedSample(1, y: 0.5, baseline: 0.1),
             associatedSample(2, y: 0.65, baseline: nil)]))
         XCTAssertFalse(detector.consume(samples: [associatedSample(2, y: 0.65, baseline: 0.1),
@@ -137,7 +212,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
                 let candidate = associatedSample(2, y: peak, baseline: 0.1, mismatch: mismatch)
                 XCTAssertTrue(candidate.metadata.pose.joints.isEmpty)
                 XCTAssertTrue(candidate.metadata.isValid)
-                XCTAssertFalse(ServeTossApexDetector().consume(samples: [
+                XCTAssertFalse(ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation).consume(samples: [
                     associatedSample(1, y: 0.5, baseline: 0.1), candidate,
                     associatedSample(3, y: 0.5, baseline: 0.1)]))
             }
@@ -158,7 +233,7 @@ final class ServeTossApexDetectorTests: XCTestCase {
         batchSize: Int = 5,
         baseline: CGFloat? = nil
     ) -> [Int] {
-        let detector = ServeTossApexDetector()
+        let detector = ServeTossApexDetector(sourceID: AnalysisFixture.source, generation: AnalysisFixture.generation)
         var firingBatchIndices: [Int] = []
         var batchIndex = 0
 
