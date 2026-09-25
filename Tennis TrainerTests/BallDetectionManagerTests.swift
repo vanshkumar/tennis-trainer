@@ -7,9 +7,11 @@ final class BallDetectionManagerTests: XCTestCase {
   func testPreparedPixelsRemainOwned_WhenSourceIsMutated() throws {
     let source = try AnalysisFixture.pixels(sentinel: 42)
     let identity = AnalysisFixture.identity(1)
-    let frame = try XCTUnwrap(AnalysisFrame.prepare(input: .init(pixelBuffer: source,
-      sourceTime: identity.sourceTime, orientation: .up, sourceID: identity.sourceID),
-      identity: identity, pose: .init(identity: identity, joints: [:])))
+    let input = BallDetectionManager.Input(pixelBuffer: source, sourceTime: identity.sourceTime,
+      orientation: .up, sourceID: identity.sourceID)
+    let frame = try XCTUnwrap(AnalysisFrame.prepare(input: input, identity: identity,
+      pose: .init(identity: identity, joints: [:])))
+    XCTAssertEqual(frame.metadata.ingressTime, input.ingressTime)
     XCTAssertFalse(frame.pixels === source)
     let before = AnalysisFixture.sentinel(frame.pixels)
     AnalysisFixture.fill(source, 99)

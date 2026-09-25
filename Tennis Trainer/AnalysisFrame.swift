@@ -104,7 +104,7 @@ struct AnalysisFrame {
 
   static func prepare(input: BallDetectionManager.Input, identity: BallDetectionManager.FrameIdentity,
                       pose: PoseDetectionManager.FramePose,
-                      ingressTime: CFTimeInterval = CACurrentMediaTime()) -> AnalysisFrame? {
+                      ingressTime: CFTimeInterval? = nil) -> AnalysisFrame? {
     guard input.sourceID == identity.sourceID,
           let oriented = PixelBufferScaler.shared.copyApplyingOrientation(input.pixelBuffer,
             orientation: input.orientation) else { return nil }
@@ -116,7 +116,8 @@ struct AnalysisFrame {
     let scale = portrait ? min(768 / w, 432 / h) : max(768 / w, 432 / h)
     let mapping = Mapping(sourceWidth: Float(w), sourceHeight: Float(h), scale: Float(scale),
       offsetX: Float((768 - w * scale) / 2), offsetY: Float((432 - h * scale) / 2))
-    let metadata = Metadata(identity: identity, sourceTime: input.sourceTime, ingressTime: ingressTime,
+    let metadata = Metadata(identity: identity, sourceTime: input.sourceTime,
+      ingressTime: ingressTime ?? input.ingressTime,
       rawSize: rawSize, orientedSize: CGSize(width: w, height: h), orientation: input.orientation,
       mapping: mapping, pose: pose)
     guard metadata.isValid else { return nil }

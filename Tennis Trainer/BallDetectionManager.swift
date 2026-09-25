@@ -11,6 +11,7 @@ final class BallDetectionManager: ObservableObject {
     let sourceTime: CMTime
     let orientation: CGImagePropertyOrientation
     let sourceID: UUID
+    let ingressTime = CACurrentMediaTime()
   }
 
   struct FrameIdentity: Equatable {
