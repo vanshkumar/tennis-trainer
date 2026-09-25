@@ -57,3 +57,18 @@
 - Observation: The user approved all 17 reliability requirements and the four-phase roadmap organized around complete user outcomes. Clip/device evidence is not yet available, and the accepted requirements call for criteria fixed before final scoring.
 - Action: Keep requirement ownership explicit in `.planning/ROADMAP.md`; begin validation protocol and baseline collection with the first implementation phase, then consolidate final evidence after the fixes instead of postponing all tests and fixture acquisition until the last phase.
 - Confidence: high
+
+**2026-09-25 — Phase 1 test planning**
+- Observation: `AppRuntime.isRunningTests` suppresses camera/audio setup, but direct `BallDetectionManager` construction eagerly creates the Core ML detector, and `VideoPlayerManager.setupBallDetection` does not suppress that construction.
+- Action: Inject fake inference and pose dependencies before production services are constructed when adding deterministic pipeline tests; do not assume the existing test guard makes every manager safe to instantiate.
+- Confidence: high
+
+**2026-09-25 — Local simulator preflight**
+- Observation: This host currently has Xcode 27.0 and an available iPhone 17 Pro simulator on iOS 26.5; the repository's example iPhone 15 destination is absent. Reading CoreSimulator state succeeded after sandbox escalation.
+- Action: Use the discovered iPhone 17 Pro/iOS 26.5 destination for Phase 1 test commands, recheck availability in future sessions, and distinguish sandbox service-access errors from app test failures. Keep the app's iOS 18.5 deployment target.
+- Confidence: high
+
+**2026-09-25 — Pose fallback plan review**
+- Observation: The initial Phase 1 plan conflated invalid frame/window metadata, which rejects analysis, with mismatched per-sample pose, which must become missing and use the existing height fallback under CUE-04.
+- Action: Keep these failure cases separate in implementation and tests. For mismatched pose, test a cue above 0.70 and suppression at/below 0.70 with valid frame metadata, cooldown satisfied, and all other eligibility conditions met.
+- Confidence: high

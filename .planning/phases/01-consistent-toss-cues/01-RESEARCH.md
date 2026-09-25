@@ -377,11 +377,18 @@ These are not approved product preferences or established empirical facts. Do no
 
 ## Open Questions
 
+The five items below have **resolved planning dispositions** as of 2026-09-25. This resolves where each question is handled; it does not claim the measurements or implementation checks have already passed.
+
 1. **Sampling sufficiency:** What admitted-frame gaps occur on supported hardware under the recommended bound, and which fully observed tosses remain detectable? Start measurement with baseline clips; do not invent a gap threshold.
+   **RESOLVED (planning disposition):** 01-01 Task 1 preserves the baseline and measurement protocol before implementation. 01-03 Task 2 records admitted gaps, drops, resource bounds, and any available clip evidence. Sampling sufficiency remains empirically unverified; Phase 4 owns final clip/device acceptance against frozen criteria.
 2. **Empirical inputs:** Which permitted clips, physical iPhone, and audio synchronization setup are available? Record unavailable items now; final evidence remains a later gate.
+   **RESOLVED (planning disposition):** 01-01 Task 1 creates the availability/provenance inventory; 01-03 Task 2 carries outstanding evidence into the handoff. Unknown resources stay explicitly unavailable or pending. Phase 4 cannot claim verified reliability without its required clip/device/audio evidence.
 3. **Tensor reality:** Fixture-test the preserved layout and run one bundled-model contract smoke check during implementation. Static decoder assumptions are not a substitute for inspecting actual model outputs.
+   **RESOLVED (planning disposition):** 01-03 Task 1 owns strict tensor fixtures and the separate bundled-model smoke check. Record actual output names, shapes, types, and strides when run; a skipped or unavailable smoke remains incomplete evidence, never a pass. No model execution has occurred during planning.
 4. **First-observation cue estimates:** Deduping each frame once makes history deterministic but fixes the first decoded estimate despite later contextual estimates. Record this estimator policy and compare clip outcomes before proposing any different policy.
+   **RESOLVED (planning disposition):** 01-02 Task 3 selects and tests the first-observation identity policy, including repeated windows, missing estimates, and replay after history pruning. 01-03 Task 2 documents that policy in the evidence ledger. Any later estimator change requires recorded evidence; the policy is a technical planning choice, not a newly approved user preference.
 5. **Baseline comparison:** The old app does not preserve exact source timing throughout the pipeline. Baseline capture must state that limitation; do not compare its callback timestamps as though they were physical/audio ground truth.
+   **RESOLVED (planning disposition):** 01-01 Task 1 records the pre-change source reference and timing limitations before edits. 01-03 Task 2 separates source time, software scheduling, and physical sound onset in the ledger. The future Phase 4 comparison must retain those distinctions; no baseline accuracy or audio timing is claimed here.
 
 No unresolved question prevents implementation planning; none authorizes fabricated verification results.
 
