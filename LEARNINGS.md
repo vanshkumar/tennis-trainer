@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-25 — Media ingress tracer**
+- Observation: Adding a Swift overload to the display-link callback made its `#selector` reference ambiguous under Xcode 27; an explicitly named `processDisplayLinkFrame` callback compiles while the testable output-reader adapter retains `processCurrentFrame`.
+- Action: Keep the Objective-C display-link selector unambiguous when extending the playback adapter; verify real capture PTS and copied display time through injected manager tests.
+- Confidence: high
+
 **2026-09-18 — Xcode Cloud manifest**
 - Observation: `Tennis Trainer.xcodeproj/xcshareddata/xcodecloud/manifest.json` records project and target IDs, but does not define workflow triggers or TestFlight distribution.
 - Action: Use the manifest for target association; continue checking Xcode Cloud workflow settings separately when verifying releases.

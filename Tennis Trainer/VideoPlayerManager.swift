@@ -46,6 +46,7 @@ class VideoPlayerManager: ObservableObject {
         // Clean up previous player
         cleanup()
         sourceID = UUID()
+        ballDetectionManager?.resetTrackingState(sourceID: sourceID)
         
         let asset = AVAsset(url: url)
         playerItem = AVPlayerItem(asset: asset)
