@@ -19,6 +19,7 @@ class CameraManager: NSObject, ObservableObject {
     var ballDetectionManager: BallDetectionManager?
     var onFrameProcessed: (() -> Void)?
     var onApex: (() -> Void)?
+    private let sourceID = UUID()
     
     override init() {
         super.init()
@@ -177,36 +178,32 @@ class CameraManager: NSObject, ObservableObject {
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard canProcessFrame() else { return }
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        
-        processFrame(pixelBuffer: pixelBuffer)
+        submitSampleBuffer(sampleBuffer)
     }
     
-    private func processFrame(pixelBuffer: CVPixelBuffer) {
-        let orientation = CGImagePropertyOrientation.right
-        poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
-        guard canProcessFrame() else { return }
-        ballDetectionManager?.process(pixelBuffer: pixelBuffer, orientation: orientation)
-
-        guard canProcessFrame() else { return }
-        DispatchQueue.main.async {
-            self.onFrameProcessed?()
-        }
+    func submitSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        guard let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        ballDetectionManager?.process(input: .init(
+            pixelBuffer: pixels, sourceTime: time, orientation: .right, sourceID: sourceID
+        ))
     }
 }
 
 // MARK: - Setup
 extension CameraManager {
-    func setupBallDetection(with pose: PoseDetectionManager) {
-        guard !AppRuntime.isRunningTests else {
+    func setupBallDetection(with pose: PoseDetectionManager,
+                            factory: ((PoseDetectionManager) -> BallDetectionManager)? = nil) {
+        guard factory != nil || !AppRuntime.isRunningTests else {
             self.ballDetectionManager = nil
             return
         }
         // Live overlay prefers the freshest frame index (t=4)
-        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
+        let manager = factory?(pose) ?? BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
         manager.onApex = { [weak self] in
             self?.onApex?()
         }
+        manager.onFrameProcessed = { [weak self] in self?.onFrameProcessed?() }
         self.ballDetectionManager = manager
     }
 }

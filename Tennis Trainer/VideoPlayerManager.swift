@@ -2,6 +2,26 @@ import AVFoundation
 import SwiftUI
 
 class VideoPlayerManager: ObservableObject {
+    protocol FrameOutputReading {
+        func hasNewPixelBuffer(forItemTime time: CMTime) -> Bool
+        func copyFrame(forItemTime time: CMTime) -> (CVPixelBuffer, CMTime)?
+    }
+
+    private struct PlayerOutputReader: FrameOutputReading {
+        let output: AVPlayerItemVideoOutput
+        func hasNewPixelBuffer(forItemTime time: CMTime) -> Bool {
+            output.hasNewPixelBuffer(forItemTime: time)
+        }
+        func copyFrame(forItemTime time: CMTime) -> (CVPixelBuffer, CMTime)? {
+            var displayTime = CMTime.invalid
+            guard let pixels = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: &displayTime) else {
+                return nil
+            }
+            return (pixels, displayTime)
+        }
+    }
+
+    private var sourceID = UUID()
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
@@ -25,6 +45,7 @@ class VideoPlayerManager: ObservableObject {
         
         // Clean up previous player
         cleanup()
+        sourceID = UUID()
         
         let asset = AVAsset(url: url)
         playerItem = AVPlayerItem(asset: asset)
@@ -75,7 +96,7 @@ class VideoPlayerManager: ObservableObject {
     }
     
     private func startFrameProcessing() {
-        displayLink = CADisplayLink(target: self, selector: #selector(processCurrentFrame))
+        displayLink = CADisplayLink(target: self, selector: #selector(processDisplayLinkFrame))
         displayLink?.add(to: .main, forMode: .common)
     }
     
@@ -84,30 +105,24 @@ class VideoPlayerManager: ObservableObject {
         displayLink = nil
     }
     
-    @objc private func processCurrentFrame() {
+    @objc private func processDisplayLinkFrame() {
         guard let videoOutput = videoOutput,
               let player = player,
               isPlaying else {
             return
         }
         
-        let currentTime = player.currentTime()
-        guard let pixelBuffer = videoOutput.copyPixelBuffer(forItemTime: currentTime, itemTimeForDisplay: nil) else {
-            return
-        }
-        
-        let orientation = getVideoOrientation()
-        poseDetectionManager?.detectPose(in: pixelBuffer, orientation: orientation)
-        let ts = CMTimeGetSeconds(currentTime)
-        ballDetectionManager?.process(
-            pixelBuffer: pixelBuffer,
-            timestamp: ts,
-            orientation: orientation
-        )
+        processCurrentFrame(output: PlayerOutputReader(output: videoOutput),
+                            requestedTime: player.currentTime(), orientation: getVideoOrientation())
+    }
 
-        DispatchQueue.main.async {
-            self.onFrameProcessed?()
-        }
+    func processCurrentFrame(output: FrameOutputReading, requestedTime: CMTime,
+                             orientation: CGImagePropertyOrientation) {
+        guard output.hasNewPixelBuffer(forItemTime: requestedTime),
+              let (pixels, time) = output.copyFrame(forItemTime: requestedTime) else { return }
+        ballDetectionManager?.process(input: .init(
+            pixelBuffer: pixels, sourceTime: time, orientation: orientation, sourceID: sourceID
+        ))
     }
     
     private func getVideoOrientation() -> CGImagePropertyOrientation {
@@ -203,12 +218,15 @@ class VideoPlayerManager: ObservableObject {
         return playerLayer
     }
 
-    func setupBallDetection(with pose: PoseDetectionManager) {
+    func setupBallDetection(with pose: PoseDetectionManager,
+                            factory: ((PoseDetectionManager) -> BallDetectionManager)? = nil) {
+        guard factory != nil || !AppRuntime.isRunningTests else { return }
         // Video overlay favors the freshest frame to avoid visible lag.
-        let manager = BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
+        let manager = factory?(pose) ?? BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
         manager.onApex = { [weak self] in
             self?.onApex?()
         }
+        manager.onFrameProcessed = { [weak self] in self?.onFrameProcessed?() }
         self.ballDetectionManager = manager
     }
     
