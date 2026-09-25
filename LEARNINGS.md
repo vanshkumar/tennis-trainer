@@ -32,3 +32,28 @@
 - Observation: The app is portrait-only, and setting the app target to `TARGETED_DEVICE_FAMILY = 1` makes Release asset compilation use `--target-device iphone` while the compiled product can still include the required `AppIcon60x60@2x.png` and `AppIcon76x76@2x~ipad.png` compatibility icon files.
 - Action: For TestFlight validation fixes, keep `INFOPLIST_KEY_CFBundleIconName = AppIcon`, keep concrete PNG-backed `AppIcon.appiconset` entries, and verify the built Info.plist has `UIDeviceFamily = [1]` plus `CFBundleIconName = AppIcon`.
 - Confidence: high
+
+**2026-09-18 — GSD installation**
+- Observation: GSD Core 1.14.0 was installed globally for Codex in `~/.codex`; this repository does not need a local GSD installation. The desktop shell did not expose `npx`, but the existing mise Node installation at `~/.local/share/mise/installs/node/24.16.0/bin` supplied it.
+- Action: Use the global GSD skills for this project; when running npm tools from the desktop shell, include the installed mise Node bin directory in PATH.
+- Confidence: high
+
+**2026-09-19 — Codebase mapping**
+- Observation: `BallDetectionManager` checks and resets `isInFlight` inside closures submitted to its serial inference queue, so the flag does not reject queued requests. `GridTrackNetDetector` also reads timestamps and frame mappings separately from the synchronized prediction, permitting input metadata to drift between those operations.
+- Action: When planning inference reliability work, verify queue admission and capture frames, timestamps, and mappings together; do not assume the PRD's stated single-flight drop policy is implemented by this flag.
+- Confidence: high
+
+**2026-09-24 — GSD project initialization**
+- Observation: The approved first milestone is reliability of the existing toss-apex cue in both live-camera and saved-video modes, including synchronization, stale-feedback prevention, overlay alignment, permission recovery, playback lifecycle, and clip/device validation.
+- Action: Use `.planning/PROJECT.md` as the milestone scope; keep trophy/contact cues and other strokes deferred while retaining portrait, right-handed solo practice.
+- Confidence: high
+
+**2026-09-24 — GSD workflow preferences**
+- Observation: This project uses automatic execution within approved scope, coarse phases, parallel work, Git-tracked planning docs, inherited agent models, full instructions, research, plan checks, verification, and source-drift checks. Extra PR sections are disabled.
+- Action: Preserve these choices in `.planning/config.json` when resuming initialization or running phase workflows; do not re-prompt for preferences already approved.
+- Confidence: high
+
+**2026-09-25 — Reliability roadmap**
+- Observation: The user approved all 17 reliability requirements and the four-phase roadmap organized around complete user outcomes. Clip/device evidence is not yet available, and the accepted requirements call for criteria fixed before final scoring.
+- Action: Keep requirement ownership explicit in `.planning/ROADMAP.md`; begin validation protocol and baseline collection with the first implementation phase, then consolidate final evidence after the fixes instead of postponing all tests and fixture acquisition until the last phase.
+- Confidence: high

@@ -1,7 +1,7 @@
 # Requirements: Tennis Trainer
 
 **Defined:** 2026-09-24
-**Status:** Approved 2026-09-25; roadmap mapping pending
+**Status:** Requirements and roadmap mappings approved 2026-09-25
 **Milestone:** Toss-apex reliability in live camera and saved-video playback
 **Core Value:** A player can trust the toss-apex beep to correspond to the current toss, without stale or duplicate feedback interrupting practice.
 
@@ -80,32 +80,32 @@ Deferred improvements to consider only after evidence supports their value:
 
 ## Traceability
 
-Phase assignments will be added after requirements confirmation and roadmap creation. Each v1 requirement will map to exactly one owning phase; other phases may exercise its integration.
+Each v1 requirement maps to exactly one owning phase in the approved roadmap; other phases may exercise its integration. Regression tests accompany implementation, while Phase 4 owns complete CHECK-01 verification. Evaluation protocol and baseline acquisition begin in Phase 1, while Phase 4 owns final CHECK-02 acceptance.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CUE-01 | TBD | Pending |
-| CUE-02 | TBD | Pending |
-| CUE-03 | TBD | Pending |
-| CUE-04 | TBD | Pending |
-| LIFE-01 | TBD | Pending |
-| LIFE-02 | TBD | Pending |
-| VIEW-01 | TBD | Pending |
-| VIEW-02 | TBD | Pending |
-| CAM-01 | TBD | Pending |
-| CAM-02 | TBD | Pending |
-| PLAY-01 | TBD | Pending |
-| PLAY-02 | TBD | Pending |
-| PLAY-03 | TBD | Pending |
-| PLAY-04 | TBD | Pending |
-| CHECK-01 | TBD | Pending |
-| CHECK-02 | TBD | Pending |
-| CHECK-03 | TBD | Pending |
+| CUE-01 | Phase 1 | Pending |
+| CUE-02 | Phase 1 | Pending |
+| CUE-03 | Phase 1 | Pending |
+| CUE-04 | Phase 1 | Pending |
+| LIFE-01 | Phase 2 | Pending |
+| LIFE-02 | Phase 2 | Pending |
+| VIEW-01 | Phase 3 | Pending |
+| VIEW-02 | Phase 3 | Pending |
+| CAM-01 | Phase 2 | Pending |
+| CAM-02 | Phase 2 | Pending |
+| PLAY-01 | Phase 2 | Pending |
+| PLAY-02 | Phase 2 | Pending |
+| PLAY-03 | Phase 2 | Pending |
+| PLAY-04 | Phase 2 | Pending |
+| CHECK-01 | Phase 4 | Pending |
+| CHECK-02 | Phase 4 | Pending |
+| CHECK-03 | Phase 4 | Pending |
 
 **Coverage:**
 - v1 requirements: 17 total
-- Mapped to phases: 0 — roadmap pending
-- Unmapped: 17 — expected during initialization
+- Mapped to phases: 17
+- Unmapped: 0
 
 ## Basis
 
@@ -115,4 +115,4 @@ Phase assignments will be added after requirements confirmation and roadmap crea
 
 ---
 *Requirements defined: 2026-09-24*
-*Last updated: 2026-09-25 after user approval of all 17 requirements*
+*Last updated: 2026-09-25 after approval of all 17 requirements and their roadmap mappings*
