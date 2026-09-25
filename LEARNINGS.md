@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-25 — Bounded analysis publication**
+- Observation: A track callback can synchronously reset its own `BallDetectionManager`; checking generation only when entering publication still allowed the pending apex callback to fire. The regression reproduces this without sleeps or model execution.
+- Action: Recheck generation after observable pose/ball updates and track callbacks; hold the lease through the entire effect batch. Coalesce idle resets into one clearing publication and defer model clearing to its worker.
+- Confidence: high
+
 **2026-09-25 — Media ingress tracer**
 - Observation: Adding a Swift overload to the display-link callback made its `#selector` reference ambiguous under Xcode 27; an explicitly named `processDisplayLinkFrame` callback compiles while the testable output-reader adapter retains `processCurrentFrame`.
 - Action: Keep the Objective-C display-link selector unambiguous when extending the playback adapter; verify real capture PTS and copied display time through injected manager tests.

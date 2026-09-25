@@ -18,10 +18,14 @@ final class BallDetectionManagerTests: XCTestCase {
     let worker = Scheduler()
     let publication = Scheduler()
     var calls = 0
+    var poses = 0
     var effects = 0
-    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _ in
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
       calls += 1
       return .init(samples: nil, position: CGPoint(x: 0.5, y: 0.5))
+    }, extractPose: { _, identity in
+      poses += 1
+      return .init(identity: identity, joints: [:])
     }, worker: worker.enqueue, publication: publication.enqueue))
     manager.onFrameProcessed = { effects += 1 }
     let buffer = try pixels()
@@ -30,19 +34,28 @@ final class BallDetectionManagerTests: XCTestCase {
     for i in 1...1000 { XCTAssertFalse(manager.process(input: input(buffer, Int64(i), source: source))) }
     XCTAssertEqual(worker.jobs.count, 1)
     XCTAssertEqual(calls, 0)
+    XCTAssertEqual(poses, 0)
     worker.run()
     for i in 1001...2000 { XCTAssertFalse(manager.process(input: input(buffer, Int64(i), source: source))) }
     XCTAssertEqual(calls, 1)
+    XCTAssertEqual(poses, 1)
     XCTAssertEqual(publication.jobs.count, 1)
     XCTAssertEqual(effects, 0)
     publication.run()
     XCTAssertEqual(effects, 1)
+    XCTAssertEqual(manager.diagnostics.admitted, 1)
+    XCTAssertEqual(manager.diagnostics.dropped, 2000)
+    XCTAssertEqual(manager.diagnostics.completed, 1)
+    XCTAssertEqual(manager.diagnostics.released, 1)
+    XCTAssertEqual(manager.diagnostics.pendingInputs, 0)
+    XCTAssertEqual(manager.diagnostics.leaseHighWater, 1)
+    XCTAssertEqual(manager.diagnostics.publicationHighWater, 1)
     XCTAssertTrue(manager.process(input: input(buffer, 2001, source: source)))
   }
 
   func testClearsValues_WhenResetWhileIdle() throws {
     let publication = Scheduler()
-    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _ in
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
       .init(samples: nil, position: CGPoint(x: 0.5, y: 0.5))
     }, worker: { $0() }, publication: publication.enqueue))
     XCTAssertTrue(manager.process(input: input(try pixels(), 0, source: UUID())))
@@ -72,7 +85,7 @@ final class BallDetectionManagerTests: XCTestCase {
     let worker = Scheduler()
     let publication = Scheduler()
     var effects = 0
-    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _ in
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
       .init(samples: nil, position: CGPoint(x: 0.5, y: 0.5))
     }, worker: worker.enqueue, publication: publication.enqueue))
     manager.onFrameProcessed = { effects += 1 }
@@ -128,7 +141,7 @@ final class BallDetectionManagerTests: XCTestCase {
   }
 
   private func tracer(_ received: @escaping (BallDetectionManager.Input) -> Void) -> BallDetectionManager {
-    BallDetectionManager(dependencies: .init(analyze: { input, _ in
+    BallDetectionManager(dependencies: .init(analyze: { input, _, _ in
       received(input)
       let t = CMTimeGetSeconds(input.sourceTime)
       let y = 0.5 + 0.4 * sin(.pi * (t - 10) / 0.99)
@@ -181,6 +194,14 @@ final class BallDetectionManagerTests: XCTestCase {
     XCTAssertTrue(AppRuntime.isRunningTests)
     var analyses = 0
     var factories = 0
+    var productionFactories = 0
+    let fake = BallDetectionManager.Dependencies(analyze: { _, _, _ in
+      .init(samples: nil, position: nil)
+    }, worker: { $0() }, publication: { $0() })
+    _ = BallDetectionManager(poseDetectionManager: nil, dependencies: fake, productionFactory: { _ in
+      productionFactories += 1
+      return fake
+    })
     let manager = tracer { _ in analyses += 1 }
     let camera = CameraManager()
     camera.setupBallDetection(with: PoseDetectionManager(), factory: { _ in
@@ -192,5 +213,175 @@ final class BallDetectionManagerTests: XCTestCase {
     XCTAssertTrue(camera.ballDetectionManager === manager)
     XCTAssertFalse(camera.isRecording)
     XCTAssertEqual(analyses, 1)
+    XCTAssertEqual(productionFactories, 0)
+  }
+
+  func testRejectsInvalidEqualAndRegressingTimes_WhenGenerationUnchanged() throws {
+    let manager = tracer { _ in }
+    let buffer = try pixels()
+    let source = UUID()
+    XCTAssertTrue(manager.process(input: input(buffer, 1000, source: source)))
+    for time in [CMTime.invalid, .indefinite, .positiveInfinity, .negativeInfinity,
+                 CMTime(value: 2, timescale: 2), CMTime(value: 999, timescale: 1000)] {
+      XCTAssertFalse(manager.process(input: .init(pixelBuffer: buffer, sourceTime: time,
+        orientation: .up, sourceID: source)))
+    }
+    XCTAssertFalse(manager.process(input: input(buffer, 1001, source: UUID())))
+    manager.resetTrackingState(sourceID: source)
+    XCTAssertTrue(manager.process(input: input(buffer, 0, source: source)))
+  }
+
+  func testSequenceFailsClosed_WhenCounterExhaustedUntilReset() throws {
+    var sequences: [UInt64] = []
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, identity, _ in
+      sequences.append(identity.sequence)
+      return .init(samples: nil, position: nil)
+    }, worker: { $0() }, publication: { $0() }), initialSequence: UInt64.max - 1)
+    let buffer = try pixels()
+    let source = UUID()
+    XCTAssertTrue(manager.process(input: input(buffer, 0, source: source)))
+    XCTAssertFalse(manager.process(input: input(buffer, 1, source: source)))
+    manager.resetTrackingState()
+    XCTAssertTrue(manager.process(input: input(buffer, 0, source: source)))
+    XCTAssertEqual(sequences, [UInt64.max, 1])
+  }
+
+  func testReleasesCapacity_WhenWarmupMissingModelPreparationOrPredictionFails() throws {
+    enum Failure: Error { case prediction }
+    for terminal in ["warmup", "missing-model", "preparation-failed", "prediction-threw", "result-rejected"] {
+      var calls = 0
+      var processed = 0
+      let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+        calls += 1
+        if terminal == "prediction-threw" { throw Failure.prediction }
+        // These backend terminal conditions all return no usable sample batch.
+        return .init(samples: nil, position: nil)
+      }, worker: { $0() }, publication: { $0() }))
+      manager.onFrameProcessed = { processed += 1 }
+      let buffer = try pixels()
+      let source = UUID()
+      XCTAssertTrue(manager.process(input: input(buffer, 0, source: source)), terminal)
+      XCTAssertTrue(manager.process(input: input(buffer, 1, source: source)), terminal)
+      XCTAssertEqual(calls, 2, terminal)
+      XCTAssertEqual(processed, 2, terminal)
+      XCTAssertEqual(manager.diagnostics.released, 2, terminal)
+      XCTAssertEqual(manager.diagnostics.currentLeases, 0, terminal)
+    }
+  }
+
+  func testPublishesPoseAndProcessedTogether_WhenWarmupCompletes() throws {
+    let worker = Scheduler()
+    let publication = Scheduler()
+    var events: [String] = []
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, pose in
+      XCTAssertEqual(pose.baselineY, 0.8)
+      events.append("analysis")
+      return .init(samples: nil, position: nil)
+    }, extractPose: { _, identity in
+      events.append("extract")
+      return .init(identity: identity, joints: [.nose: .init(location: CGPoint(x: 0.5, y: 0.8), confidence: 0.9)])
+    }, publishPose: { _ in events.append("publish-pose") },
+    worker: worker.enqueue, publication: publication.enqueue))
+    manager.onFrameProcessed = { events.append("processed") }
+    manager.process(input: input(try pixels(), 0, source: UUID()))
+    XCTAssertEqual(events, [])
+    worker.run()
+    XCTAssertEqual(events, ["extract", "analysis"])
+    publication.run()
+    XCTAssertEqual(events, ["extract", "analysis", "publish-pose", "processed"])
+  }
+
+  func testMissingPose_WhenExtractorReturnsAnotherIdentity() throws {
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, pose in
+      XCTAssertNil(pose.baselineY)
+      XCTAssertTrue(pose.joints.isEmpty)
+      return .init(samples: nil, position: nil)
+    }, extractPose: { _, identity in
+      .init(identity: .init(sourceID: UUID(), generation: identity.generation,
+        sequence: identity.sequence, sourceTime: identity.sourceTime),
+        joints: [.nose: .init(location: CGPoint(x: 0.5, y: 0.9), confidence: 0.9)])
+    }, worker: { $0() }, publication: { $0() }))
+    XCTAssertTrue(manager.process(input: input(try pixels(), 0, source: UUID())))
+  }
+
+  func testTeardown_WhenWorkerOrPublicationHeld() throws {
+    for holdPublication in [false, true] {
+      let worker = Scheduler()
+      let publication = Scheduler()
+      var effects = 0
+      var manager: BallDetectionManager? = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+        .init(samples: nil, position: nil)
+      }, worker: worker.enqueue, publication: publication.enqueue))
+      weak var weakManager = manager
+      manager?.onFrameProcessed = { effects += 1 }
+      manager?.process(input: input(try pixels(), 0, source: UUID()))
+      if holdPublication { worker.run() }
+      manager = nil
+      XCTAssertNil(weakManager)
+      if holdPublication { publication.run() } else { worker.run() }
+      XCTAssertEqual(effects, 0)
+      XCTAssertTrue(worker.jobs.isEmpty)
+      XCTAssertTrue(publication.jobs.isEmpty)
+    }
+  }
+
+  func testOldCompletionCannotReleaseNewLease_WhenDeliveredTwice() throws {
+    let publication = Scheduler()
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+      .init(samples: nil, position: nil)
+    }, worker: { $0() }, publication: publication.enqueue))
+    let buffer = try pixels()
+    let source = UUID()
+    manager.process(input: input(buffer, 0, source: source))
+    let old = publication.jobs[0]
+    publication.run()
+    manager.process(input: input(buffer, 1, source: source))
+    old()
+    XCTAssertEqual(manager.diagnostics.currentLeases, 1)
+    XCTAssertEqual(manager.diagnostics.released, 1)
+    XCTAssertFalse(manager.process(input: input(buffer, 2, source: source)))
+    publication.run()
+    XCTAssertEqual(manager.diagnostics.released, 2)
+  }
+
+  func testCombinedBounds_WhenTwoManagersSharePose() throws {
+    let buffer = try pixels()
+    let poseLock = NSLock()
+    var active = 0
+    var maximum = 0
+    var poseCalls = 0
+    let pose = PoseDetectionManager(transaction: { _, _ in
+      poseLock.lock()
+      active += 1
+      maximum = max(maximum, active)
+      poseCalls += 1
+      poseLock.unlock()
+      defer { poseLock.lock(); active -= 1; poseLock.unlock() }
+      return [:]
+    })
+    let workers = [Scheduler(), Scheduler()]
+    let publications = [Scheduler(), Scheduler()]
+    let managers = (0..<2).map { i in
+      BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+        .init(samples: nil, position: nil)
+      }, extractPose: { input, identity in
+        pose.extractPose(in: input.pixelBuffer, orientation: input.orientation, identity: identity)
+      }, worker: workers[i].enqueue, publication: publications[i].enqueue))
+    }
+    let sources = [UUID(), UUID()]
+    for i in 0..<2 {
+      XCTAssertTrue(managers[i].process(input: input(buffer, 0, source: sources[i])))
+      for time in 1...1000 {
+        XCTAssertFalse(managers[i].process(input: input(buffer, Int64(time), source: sources[i])))
+      }
+    }
+    XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 2)
+    XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.pendingInputs }, 0)
+    DispatchQueue.concurrentPerform(iterations: 2) { workers[$0].run() }
+    XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.publications }, 2)
+    XCTAssertEqual(poseCalls, 2)
+    XCTAssertEqual(maximum, 1)
+    publications.forEach { $0.run() }
+    XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 0)
   }
 }

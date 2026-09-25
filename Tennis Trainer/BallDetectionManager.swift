@@ -26,7 +26,11 @@ final class BallDetectionManager: ObservableObject {
   }
 
   struct Dependencies {
-    var analyze: (Input, FrameIdentity) throws -> Analysis
+    var analyze: (Input, FrameIdentity, PoseDetectionManager.FramePose) throws -> Analysis
+    var extractPose: (Input, FrameIdentity) -> PoseDetectionManager.FramePose = { _, identity in
+      .init(identity: identity, joints: [:])
+    }
+    var publishPose: (PoseDetectionManager.FramePose) -> Void = { _ in }
     var reset: () -> Void = {}
     var worker: (@escaping () -> Void) -> Void
     var publication: (@escaping () -> Void) -> Void
@@ -37,42 +41,105 @@ final class BallDetectionManager: ObservableObject {
     let identity: FrameIdentity
   }
 
+  struct Diagnostics {
+    fileprivate(set) var admitted: UInt64 = 0
+    fileprivate(set) var dropped: UInt64 = 0
+    fileprivate(set) var completed: UInt64 = 0
+    fileprivate(set) var released: UInt64 = 0
+    fileprivate(set) var currentLeases = 0
+    fileprivate(set) var publications = 0
+    fileprivate(set) var leaseHighWater = 0
+    fileprivate(set) var publicationHighWater = 0
+    let pendingInputs = 0
+  }
+
+  // The small scheduler state outlives an owner if a held scheduler retains a job.
+  // Jobs capture it, never the manager, so teardown still releases the owned lease.
+  private final class State {
+    let lock = NSRecursiveLock()
+    var sourceID: UUID?
+    var generation = UUID()
+    var sequence: UInt64 = 0
+    var lastTime: CMTime?
+    var lease: Lease?
+    var needsReset = false
+    var diagnostics = Diagnostics()
+
+    func isCurrent(_ identity: FrameIdentity) -> Bool {
+      sourceID == identity.sourceID && generation == identity.generation
+    }
+
+    func reserve(_ value: Lease) {
+      lease = value
+      diagnostics.currentLeases = 1
+      diagnostics.leaseHighWater = 1
+    }
+
+    func markPublication() {
+      lock.lock()
+      diagnostics.publications = 1
+      diagnostics.publicationHighWater = 1
+      lock.unlock()
+    }
+
+    func release(_ owned: Lease) {
+      lock.lock()
+      defer { lock.unlock() }
+      guard lease?.id == owned.id else { return }
+      lease = nil
+      diagnostics.currentLeases = 0
+      diagnostics.publications = 0
+      Self.increment(&diagnostics.released)
+    }
+
+    func takeReset() -> Bool {
+      lock.lock()
+      defer { lock.unlock() }
+      let reset = needsReset
+      needsReset = false
+      return reset
+    }
+
+    static func increment(_ value: inout UInt64) {
+      if value < UInt64.max { value += 1 }
+    }
+  }
+
   @Published var ballPosition: CGPoint?
   var onBallTrack: (([GridTrackNetDetector.Sample]) -> Void)?
   var onApex: (() -> Void)?
   var onFrameProcessed: (() -> Void)?
-
   private let dependencies: Dependencies
   private let overlayTIndex: Int
-  private weak var poseDetectionManager: PoseDetectionManager?
   private let apexDetector = ServeTossApexDetector()
-  private let lock = NSLock()
-  private var sourceID: UUID?
-  private var generation = UUID()
-  private var sequence: UInt64 = 0
-  private var lastTime: CMTime?
-  private var lease: Lease?
-  private var needsReset = false
+  private let state = State()
   private let compatibilitySourceID = UUID()
 
-  init(dependencies: Dependencies, overlayTIndex: Int = 4) {
-    self.dependencies = dependencies
-    self.overlayTIndex = overlayTIndex
+  var diagnostics: Diagnostics {
+    state.lock.lock()
+    defer { state.lock.unlock() }
+    return state.diagnostics
   }
 
-  convenience init(poseDetectionManager: PoseDetectionManager?, overlayTIndex: Int = 2) {
-    self.init(dependencies: Self.productionDependencies(pose: poseDetectionManager),
+  init(dependencies: Dependencies, overlayTIndex: Int = 4, initialSequence: UInt64 = 0) {
+    self.dependencies = dependencies
+    self.overlayTIndex = overlayTIndex
+    state.sequence = initialSequence
+  }
+
+  convenience init(poseDetectionManager: PoseDetectionManager?, overlayTIndex: Int = 2,
+                   dependencies: Dependencies? = nil,
+                   productionFactory: ((PoseDetectionManager?) -> Dependencies)? = nil) {
+    self.init(dependencies: dependencies ?? (productionFactory ?? Self.productionDependencies)(poseDetectionManager),
               overlayTIndex: overlayTIndex)
-    self.poseDetectionManager = poseDetectionManager
   }
 
   private static func productionDependencies(pose: PoseDetectionManager?) -> Dependencies {
-    // This factory is evaluated only by the production initializer.
+    // Only the production initializer evaluates these real backend constructors.
     let grid = GridTrackNetDetector()
     let color = ColorKalmanBallDetector()
     let queue = DispatchQueue(label: "ml.ball.analysis", qos: .userInitiated)
-    return Dependencies(analyze: { input, _ in
-      pose?.detectPose(in: input.pixelBuffer, orientation: input.orientation)
+    return Dependencies(analyze: { input, _, framePose in
       switch AppConfig.ballDetectionMethod {
       case .gridTrackNet:
         color.reset()
@@ -83,80 +150,125 @@ final class BallDetectionManager: ObservableObject {
         guard let pixels = PixelBufferScaler.shared.copyApplyingOrientation(
           input.pixelBuffer, orientation: input.orientation
         ) else { return Analysis(samples: nil, position: nil) }
-        return Analysis(samples: nil,
-          position: color.process(pixelBuffer: pixels, poseDetectionManager: pose))
+        return Analysis(samples: nil, position: color.process(pixelBuffer: pixels,
+          shoulderX: framePose.joints[.rightShoulder]?.location.x))
       }
-    }, reset: { grid.clear(); color.reset() },
+    }, extractPose: { input, identity in
+      pose?.extractPose(in: input.pixelBuffer, orientation: input.orientation, identity: identity)
+        ?? .init(identity: identity, joints: [:])
+    }, publishPose: { pose?.publish($0) }, reset: { grid.clear(); color.reset() },
     worker: { queue.async(execute: $0) }, publication: { DispatchQueue.main.async(execute: $0) })
   }
 
   @discardableResult
   func process(input: Input) -> Bool {
-    lock.lock()
-    guard lease == nil, input.sourceTime.isValid, input.sourceTime.isNumeric,
+    state.lock.lock()
+    guard state.lease == nil, input.sourceTime.isValid, input.sourceTime.isNumeric,
           CMTimeGetSeconds(input.sourceTime).isFinite,
-          sourceID == nil || sourceID == input.sourceID,
-          lastTime.map({ CMTimeCompare(input.sourceTime, $0) > 0 }) ?? true,
-          sequence < UInt64.max else {
-      lock.unlock()
+          state.sourceID == nil || state.sourceID == input.sourceID,
+          state.lastTime.map({ CMTimeCompare(input.sourceTime, $0) > 0 }) ?? true,
+          state.sequence < UInt64.max else {
+      State.increment(&state.diagnostics.dropped)
+      state.lock.unlock()
       return false
     }
-    sourceID = input.sourceID
-    sequence += 1
-    lastTime = input.sourceTime
-    let admitted = Lease(identity: FrameIdentity(sourceID: input.sourceID,
-      generation: generation, sequence: sequence, sourceTime: input.sourceTime))
-    lease = admitted
-    let reset = needsReset
-    needsReset = false
-    lock.unlock()
+    state.sourceID = input.sourceID
+    state.sequence += 1
+    state.lastTime = input.sourceTime
+    let owned = Lease(identity: FrameIdentity(sourceID: input.sourceID,
+      generation: state.generation, sequence: state.sequence, sourceTime: input.sourceTime))
+    state.reserve(owned)
+    State.increment(&state.diagnostics.admitted)
+    state.lock.unlock()
 
-    dependencies.worker { [weak self] in
-      guard let self else { return }
-      if reset { self.dependencies.reset() }
-      let result = try? self.dependencies.analyze(input, admitted.identity)
-      self.dependencies.publication { [weak self] in
+    let state = self.state
+    let dependencies = self.dependencies
+    dependencies.worker { [weak self, state, dependencies] in
+      guard self != nil else { state.release(owned); return }
+      if state.takeReset() { dependencies.reset() }
+      state.lock.lock()
+      let current = state.isCurrent(owned.identity)
+      state.lock.unlock()
+      var pose = PoseDetectionManager.FramePose(identity: owned.identity, joints: [:])
+      var result: Analysis?
+      if current {
+        let extracted = dependencies.extractPose(input, owned.identity)
+        // A mismatched pose is missing, never a substitute for this frame.
+        if extracted.identity == owned.identity { pose = extracted }
+        result = try? dependencies.analyze(input, owned.identity, pose)
+      }
+      if state.takeReset() { dependencies.reset() }
+      state.markPublication()
+      // Capture value results only: this closure does not retain Input/pixels/tensors.
+      let completedPose = pose
+      let completedResult = result
+      dependencies.publication { [weak self, state] in
+        defer { state.release(owned) }
         guard let self else { return }
-        defer { self.release(admitted) }
-        guard self.isCurrent(admitted.identity) else {
-          self.ballPosition = nil
-          self.apexDetector.reset()
-          return
-        }
-        self.ballPosition = result?.samples?.first { $0.tIndex == self.overlayTIndex }?.position
-          ?? result?.position
-        if let samples = result?.samples {
-          self.onBallTrack?(samples)
-          if self.apexDetector.consume(samples: samples, heightGateProvider: self.poseDetectionManager) {
-            self.onApex?()
-          }
-        }
-        self.onFrameProcessed?()
+        self.publish(completedResult, pose: completedPose, lease: owned)
       }
     }
     return true
   }
 
-  private func isCurrent(_ identity: FrameIdentity) -> Bool {
-    lock.lock()
-    defer { lock.unlock() }
-    return sourceID == identity.sourceID && generation == identity.generation
+  private final class HeightGate: ServeTossApexHeightGateProviding {
+    let serveTossApexGateBaselineY: CGFloat?
+    init(_ baseline: CGFloat?) { serveTossApexGateBaselineY = baseline }
   }
 
-  private func release(_ completed: Lease) {
-    lock.lock()
-    defer { lock.unlock() }
-    if lease?.id == completed.id { lease = nil }
+  private func publish(_ result: Analysis?, pose: PoseDetectionManager.FramePose, lease: Lease) {
+    // Serializes reset against the short effect batch, never against Vision/model work.
+    // Recursive locking permits a UI/callback subscriber to invalidate synchronously.
+    state.lock.lock()
+    defer { state.lock.unlock() }
+    guard state.lease?.id == lease.id else { return }
+    State.increment(&state.diagnostics.completed)
+    guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    dependencies.publishPose(pose)
+    guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    ballPosition = result?.samples?.first { $0.tIndex == overlayTIndex }?.position ?? result?.position
+    guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    if let samples = result?.samples {
+      onBallTrack?(samples)
+      guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+      if apexDetector.consume(samples: samples, heightGateProvider: HeightGate(pose.baselineY)) {
+        onApex?()
+      }
+    }
+    guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    onFrameProcessed?()
+  }
+
+  private func clearPublishedValues() {
+    apexDetector.reset()
+    ballPosition = nil
+    dependencies.publishPose(.init(identity: FrameIdentity(sourceID: state.sourceID ?? compatibilitySourceID,
+      generation: state.generation, sequence: 0, sourceTime: .invalid), joints: [:]))
   }
 
   func resetTrackingState(sourceID: UUID? = nil) {
-    lock.lock()
-    generation = UUID()
-    if let sourceID { self.sourceID = sourceID }
-    sequence = 0
-    lastTime = nil
-    needsReset = true
-    lock.unlock()
+    state.lock.lock()
+    state.generation = UUID()
+    if let sourceID { state.sourceID = sourceID }
+    state.sequence = 0
+    state.lastTime = nil
+    state.needsReset = true
+    // Busy resets occupy no additional slot; their job discards its final effects.
+    guard state.lease == nil else { state.lock.unlock(); return }
+    let owned = Lease(identity: FrameIdentity(sourceID: state.sourceID ?? compatibilitySourceID,
+      generation: state.generation, sequence: 0, sourceTime: .invalid))
+    state.reserve(owned)
+    state.markPublication()
+    state.lock.unlock()
+    let state = self.state
+    dependencies.publication { [weak self, state] in
+      defer { state.release(owned) }
+      guard let self else { return }
+      state.lock.lock()
+      self.clearPublishedValues()
+      state.lock.unlock()
+    }
+    // Model storage is cleared only by the next worker, coalescing idle resets.
   }
 
   func process(pixelBuffer: CVPixelBuffer) {

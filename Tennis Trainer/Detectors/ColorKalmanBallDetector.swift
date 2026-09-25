@@ -79,6 +79,11 @@ final class ColorKalmanBallDetector {
     // MARK: - Public API
     // Returns normalized Vision-space point (origin bottom-left), or nil.
     func process(pixelBuffer: CVPixelBuffer, poseDetectionManager: PoseDetectionManager?) -> CGPoint? {
+        process(pixelBuffer: pixelBuffer,
+                shoulderX: poseDetectionManager?.getJointPosition(for: .rightShoulder)?.x)
+    }
+
+    func process(pixelBuffer: CVPixelBuffer, shoulderX: CGFloat?) -> CGPoint? {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 
@@ -87,10 +92,7 @@ final class ColorKalmanBallDetector {
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
         let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
 
-        var shoulderX: CGFloat? = nil
-        if let sx = poseDetectionManager?.getJointPosition(for: .rightShoulder)?.x {
-            shoulderX = sx + shoulderMargin
-        }
+        let shoulderX = shoulderX.map { $0 + shoulderMargin }
 
         var sumX: Double = 0
         var sumY: Double = 0
@@ -165,4 +167,3 @@ final class ColorKalmanBallDetector {
         }
     }
 }
-
