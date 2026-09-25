@@ -1,8 +1,91 @@
 import XCTest
 import CoreGraphics
+import Vision
 @testable import Tennis_Trainer
 
 final class ServeTossApexDetectorTests: XCTestCase {
+    private func associatedSample(_ index: UInt64, y: CGFloat, baseline: CGFloat?,
+                                  mismatch: String? = nil, confidence: Float = 0.9,
+                                  neck: CGFloat? = nil) -> GridTrackNetDetector.Sample {
+        let id = AnalysisFixture.identity(index)
+        let poseID = BallDetectionManager.FrameIdentity(
+            sourceID: mismatch == "source" ? UUID() : id.sourceID,
+            generation: mismatch == "generation" ? UUID() : id.generation,
+            sequence: mismatch == "frame" ? id.sequence + 1 : id.sequence, sourceTime: id.sourceTime)
+        var joints: [VNHumanBodyPoseObservation.JointName: PoseDetectionManager.Joint] = [:]
+        if let baseline { joints[.nose] = .init(location: CGPoint(x: 0.5, y: baseline), confidence: confidence) }
+        if let neck { joints[.neck] = .init(location: CGPoint(x: 0.5, y: neck), confidence: 0.9) }
+        return .init(tIndex: 0, metadata: AnalysisFixture.metadata(identity: id,
+            pose: .init(identity: poseID, joints: joints)), position: CGPoint(x: 0.5, y: y), confidence: 0.9)
+    }
+
+    func testCueUsesCandidatePose_WhenLaterNoseIsHigher() {
+        let samples = [associatedSample(1, y: 0.5, baseline: 0.6),
+                       associatedSample(2, y: 0.71, baseline: 0.6),
+                       associatedSample(3, y: 0.5, baseline: 0.95)]
+        XCTAssertTrue(ServeTossApexDetector().consume(samples: samples,
+            heightGateProvider: StubHeightGateProvider(baselineY: 0.95)))
+    }
+
+    func testNoCueUsesCandidatePose_WhenLaterNoseIsLower() {
+        let samples = [associatedSample(1, y: 0.5, baseline: 0.95),
+                       associatedSample(2, y: 0.71, baseline: 0.95),
+                       associatedSample(3, y: 0.5, baseline: 0.6)]
+        XCTAssertFalse(ServeTossApexDetector().consume(samples: samples,
+            heightGateProvider: StubHeightGateProvider(baselineY: 0.6)))
+    }
+
+    func testCueUsesFallback_WhenPoseIdentityMismatchesAboveThreshold() {
+        for mismatch in ["source", "generation", "frame"] {
+            let candidate = associatedSample(2, y: 0.71, baseline: 0.95, mismatch: mismatch)
+            XCTAssertTrue(candidate.metadata.pose.joints.isEmpty)
+            XCTAssertTrue(candidate.metadata.isValid)
+            XCTAssertTrue(ServeTossApexDetector().consume(samples: [
+                associatedSample(1, y: 0.5, baseline: 0.95), candidate,
+                associatedSample(3, y: 0.5, baseline: 0.95)], heightGateProvider: nil))
+        }
+    }
+
+    func testNosePrecedesNeck_AndInvalidNoseUsesNeckOrFallback() {
+        let cases: [(CGFloat?, Float, CGFloat?, CGFloat, Bool)] = [
+            (0.95, 0.9, 0.1, 0.71, false),
+            (nil, 0.9, 0.55, 0.65, true),
+            (0.95, 0.3, 0.55, 0.65, true),
+            (0.95, 0.3, nil, 0.71, true),
+            (.nan, 0.9, nil, 0.71, true),
+            (0.95, .infinity, nil, 0.71, true),
+            (nil, 0.9, nil, 0.70, false),
+            (0.6, 0.9, nil, 0.65, false)
+        ]
+        for (nose, confidence, neck, peak, expected) in cases {
+            let samples = [associatedSample(1, y: 0.5, baseline: 0.1),
+                associatedSample(2, y: peak, baseline: nose, confidence: confidence, neck: neck),
+                associatedSample(3, y: 0.5, baseline: 0.1)]
+            XCTAssertEqual(ServeTossApexDetector().consume(samples: samples, heightGateProvider: nil), expected)
+        }
+    }
+
+    func testMissingCandidateNeverInheritsPose_AndDelayedPoseCannotReviseCandidate() {
+        let detector = ServeTossApexDetector()
+        XCTAssertFalse(detector.consume(samples: [associatedSample(1, y: 0.5, baseline: 0.1),
+            associatedSample(2, y: 0.65, baseline: nil)], heightGateProvider: nil))
+        XCTAssertFalse(detector.consume(samples: [associatedSample(2, y: 0.65, baseline: 0.1),
+            associatedSample(3, y: 0.5, baseline: 0.1)], heightGateProvider: nil))
+    }
+
+    func testNoCue_WhenPoseIdentityMismatchesAtOrBelowFallback() {
+        for mismatch in ["source", "generation", "frame"] {
+            for peak in [CGFloat(0.69), 0.70] {
+                let candidate = associatedSample(2, y: peak, baseline: 0.1, mismatch: mismatch)
+                XCTAssertTrue(candidate.metadata.pose.joints.isEmpty)
+                XCTAssertTrue(candidate.metadata.isValid)
+                XCTAssertFalse(ServeTossApexDetector().consume(samples: [
+                    associatedSample(1, y: 0.5, baseline: 0.1), candidate,
+                    associatedSample(3, y: 0.5, baseline: 0.1)], heightGateProvider: nil))
+            }
+        }
+    }
+
     private final class StubHeightGateProvider: ServeTossApexHeightGateProviding {
         let serveTossApexGateBaselineY: CGFloat?
 
