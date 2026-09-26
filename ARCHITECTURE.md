@@ -51,7 +51,7 @@ The repository is now aligned around the serve-training product:
 ### Live Camera
 
 1. `ContentView` creates a camera service, a camera-owned pose presenter, and `AudioManager`. Playback has its own pose presenter.
-2. `CameraManager` checks current authorization, then reconciles explicit capture intent with actual session state. Starting is distinct from running; Stop remains available during startup and recovery. Denied access offers Settings, restricted access explains the restriction, and active return requeries permission without creating new capture intent.
+2. `CameraManager` constructs one immutable production capture backend before preview or session queues can access it; injected managers omit that backend. It checks current authorization, then reconciles explicit capture intent with actual session state. Starting is distinct from running; Stop remains available during startup and recovery. Denied access offers Settings, restricted access explains the restriction, and active return requeries permission without creating new capture intent.
 3. Before a new capture run opens, the session queue stops capture and detaches delivery, then drains the separate callback queue. Received frames carry their captured analysis generation and sample-buffer presentation timestamp into `BallDetectionManager`.
 4. Admission compares the expected generation under the scheduler lock and admits at most one job through publication. New frames are dropped while that lease is held.
 5. Pose extraction and ball preparation use the same admitted image. GridTrackNet predicts from an owned five-frame window, whose decoded samples retain their original metadata.

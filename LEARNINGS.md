@@ -8,6 +8,21 @@
 
 ## Task Notes
 
+**2026-09-26 — Empty pose accessibility groups**
+- Observation: Grouping pose markers with accessibilityHidden on an empty group left its identified element discoverable after Stop; the complete UI clear regression failed even though source review passed.
+- Action: Conditionally construct each mode's pose group only when tracked right-arm joints exist. Retain the real Stop/Pause UI-tree absence assertions when changing overlay accessibility.
+- Confidence: high
+
+**2026-09-26 — Replacement during an unsettled seek**
+- Observation: Replacement called Pause before retiring seek identity, so cancellation or failure preserved the clip but left Seeking displayed indefinitely. A held-completion matrix reproduced this despite the prior full suite passing.
+- Action: Retire the old seek identity before settling replacement into Paused, while retaining its unconfirmed target so Play still requires a fresh successful seek. Keep cross-control failure cases alongside per-control tests.
+- Confidence: high
+
+**2026-09-26 — Camera backend initialization ownership**
+- Observation: The preview getter and queued Stop could both first-access the lazy capture session. Immutable production backend construction before manager publication removes that allocation race; injected managers can still omit camera resources.
+- Action: Preserve the single initialized backend for preview, configuration and teardown. Do not reintroduce independently lazy session/output resources when extending capture injection.
+- Confidence: high
+
 **2026-09-26 — Simulator result finalization**
 - Observation: Xcode printed all 145 passing tests but stalled in XCTHRunDestinationAllocator.collectSimulatorDiagnostics, leaving the bundle incomplete. The unchanged full suite finalized successfully with `-collect-test-diagnostics never`.
 - Action: Require successful xcodebuild exit and a finalized result summary, not just passing test log lines. If this host repeats the diagnostic-collection stall, retain the incomplete attempt and rerun the complete selector set with that supported flag.

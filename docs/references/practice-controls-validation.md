@@ -38,6 +38,40 @@ The first final attempt (`tennis-0204-verified`) printed 145 passing tests, then
 
 Final unit inventory: AnalysisAssociationTests 10, BallDetectionManagerTests 22, CameraManagerTests 21, GridTrackNetDecoderTests 6, PoseDetectionManagerTests 4, PracticeLifecycleTests 23, ServeTossApexDetectorTests 23, VideoImportManagerTests 9, VideoPlayerManagerTests 26, Swift Testing scaffold 1. No required class or named integration is replaced by the scaffold.
 
+## Independent phase review and follow-up
+
+All four plans were independently reviewed after implementation. Code review found two blockers: unsynchronized lazy capture-session creation across preview/session queues, and replacement retiring a seek while leaving its Seeking presentation active. Commits `d1af3ea` and `792d728` fixed those with immutable production backend ownership and ordered seek retirement. Two playback regression tests first failed on the old behavior; the complete camera/player classes then passed 51/51 with zero skips. Evidence is `/tmp/tennis-02-reviewfix-{red,green}.{log,xcresult}`. Camera proof is initialization/identity testing and source inspection, not a physical race reproduction.
+
+UI review led to selection-aware recovery copy, one tracking accessibility summary per mode, clearer camera status, neutral routine permission messages, and a labelled seek slider disabled during replacement and bounded by actual clip duration (`8ba8451`). A half-second DEBUG scenario exercises midpoint and endpoint rather than only long clips. The subsequent complete UI run caught an empty pose accessibility group remaining after Stop; its failed bundle is `/tmp/tennis-phase2-post-review-checks/ui-46767432.xcresult`. Commit `212f17e` conditionally removes the group when no tracked right-arm joints remain. The failure is retained as a real regression, not waived or reclassified as infrastructure.
+
+Initial independent gates at `7e93c07` passed Release, 145 units and the full UI scheme (10 executions / nine distinct tests), zero failures/skips. After the two code-review fixes, full units increased to 149. Final post-correction results follow below. The controlled semaphore-test QoS warning remains confined to the existing test fixture.
+
+Code review is clean after fixes. The planned ASVS L1 threat register has 16 closed mitigations and zero accepted/open risks. The UI review is code-only; small-screen/large-text fit, physical VoiceOver and measured light/dark/contrast checks remain human obligations. These reviews do not certify hardware behavior or close the six undefined edge decisions.
+
+### Final independent gates after review fixes
+
+Tested source commit: `212f17e923ea9228c142e03940153620d06b6cdd`. All three bounded commands exited 0. The final result bundles are finalized; no partial attempt is counted.
+
+| Gate | Result | Duration | Evidence |
+|---|---|---:|---|
+| build | BUILD SUCCEEDED | 3.5 s | `/tmp/tennis-phase2-verified-checks/build.log` |
+| unit-regression | 149 unit tests; zero failures/skips | 22.8 s | `/tmp/tennis-phase2-verified-checks/unit-regression-745e9a37.xcresult` |
+| ui | 11 executions / 10 distinct UI tests; zero failures/skips | 198.3 s | `/tmp/tennis-phase2-verified-checks/ui-f45da81b.xcresult` |
+
+The UI summary counts the two parameterized launch runs as one distinct test; its device/configuration total and xcodebuild log report 11 executions. The short-clip accessibility/range, import recovery/enablement and Stop/Pause overlay absence checks all passed. Unit inventory changes from the plan-closeout run are CameraManagerTests 23 and VideoPlayerManagerTests 28; every other class count above is unchanged. All five Phase 1 regression classes are included.
+
+Exact final commands:
+
+```sh
+xcodebuild build -configuration Release -scheme 'Tennis Trainer' -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' CODE_SIGNING_ALLOWED=NO
+
+xcodebuild test -collect-test-diagnostics never -parallel-testing-enabled NO -scheme 'Tennis Trainer' -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' '-only-testing:Tennis TrainerTests' -resultBundlePath /tmp/tennis-phase2-verified-checks/unit-regression-745e9a37.xcresult
+
+xcodebuild test -collect-test-diagnostics never -parallel-testing-enabled NO -scheme 'Tennis Trainer UI Tests' -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' -resultBundlePath /tmp/tennis-phase2-verified-checks/ui-f45da81b.xcresult
+```
+
+Machine-readable local summary: `/tmp/tennis-phase2-verified-checks/results.json`. All 13 declared key links matched current source. Schema/codebase drift and the native UI safety gates returned nonblocking; those structural checks are separate from behavior tests. No model, target, deployment or geometry changes were made by review fixes.
+
 ## Ownership and lifecycle results
 
 - One hundred import/play/pause/seek/replacement cycles retain at most one active extraction loop, one periodic observer and one timeline event registration. Every installed injected observer removal runs once; repeated shutdown is idempotent. Delayed old callbacks cannot take over the current session. Weak probes confirm they do not retain the manager.

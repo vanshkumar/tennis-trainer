@@ -2,7 +2,9 @@
 
 No external API integration: this phase fixes existing on-device AVFoundation, PhotosUI and SwiftUI lifecycle and local-file ownership; it adds no service, endpoint, external SDK integration or package installation.
 
-Status: planning verified on 2026-09-26; implementation has not been executed or verified. User selected Continue without context on 2026-09-26; no CONTEXT.md or locked D-NN decisions exist. Research recommendations are implementation choices, not new user decisions. UI-SPEC is absent and the deterministic UI gate is nonblocking; plans preserve native controls and existing geometry.
+Planning status: verified on 2026-09-26 before implementation. User selected Continue without context on 2026-09-26; no CONTEXT.md or locked D-NN decisions exist. Research recommendations are implementation choices, not new user decisions. UI-SPEC is absent and the deterministic UI gate is nonblocking; plans preserve native controls and existing geometry.
+
+Execution update: all four plans are implemented. Current test/review results live in the four SUMMARY files, the phase REVIEW/UI-REVIEW/SECURITY/VERIFICATION reports and `docs/references/practice-controls-validation.md`. The tables below preserve planning provenance; COVERED means assigned in plans, not human acceptance. EDGE-CAM-01 and EDGE-PLAY-04 now have explicit deterministic implementation evidence. The six unclassified edge rows and evidence-limit prohibition remain pending human disposition, together with the recorded device checks.
 
 ## Source audit
 
