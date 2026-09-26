@@ -3,6 +3,19 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class CameraManagerTests: XCTestCase {
+  func testFailedStartRetiresIntentSoExplicitRetryCanStartAgain() {
+    var attempts = 0
+    let camera = CameraManager(dependencies: .init(
+      session: { $0() }, drain: { $0() }, state: { $0() },
+      stop: {}, attach: { _ in }, start: { attempts += 1; return attempts > 1 }))
+    camera.startCapture()
+    XCTAssertFalse(camera.isRecording)
+    XCTAssertFalse(camera.captureRequested, "A failed startup must offer a fresh Retry intent")
+    camera.startCapture()
+    XCTAssertEqual(attempts, 2)
+    XCTAssertTrue(camera.isRecording)
+  }
+
   func testStartDoesNotOpenCaptureWithoutPermission() {
     var starts = 0
     let camera = CameraManager(dependencies: .init(
