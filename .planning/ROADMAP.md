@@ -5,7 +5,7 @@
 Make the existing toss-apex cue dependable in both live-camera practice and saved-video review. First establish consistent feedback from correctly associated frames and pose data, then make session controls trustworthy, align visible tracking with the displayed image, and verify the combined behavior with repeatable clips and real-device evidence. Each phase delivers an observable outcome in the existing app and includes its own regression checks.
 
 **Milestone:** Toss-apex reliability
-**Status:** Phase 1 complete; Phase 2 planned and ready to execute 2026-09-26
+**Status:** Phase 1 complete; Phase 2 executing, 02-01 complete and 02-02 next (2026-09-26)
 **Structure:** Coarse, vertical MVP phases; preserve portrait, right-handed solo practice and on-device processing.
 
 ## Phases
@@ -65,10 +65,10 @@ Planning notes:
 4. Rapid clip replacement, cancellation, and failed loads leave the current selection usable; late metadata, seek, notification, and detection completions from old items cannot change its state.
 5. Repeated play/pause/replacement cycles maintain only the intended active processing loop and release retired outputs, observers, display links, and app-owned video copies without deleting original or externally owned media.
 
-**Plans:** 0/4 plans complete
+**Plans:** 1/4 plans executed
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Stop/Pause/mode lifecycle, fresh ingress and current-mode feedback
+- [x] 02-01-PLAN.md — Stop/Pause/mode lifecycle, fresh ingress and current-mode feedback
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -154,7 +154,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Consistent Toss Cues | 3/3 | Complete    | 2026-09-26 |
-| 2. Dependable Practice Controls | 0/4 | Planned | - |
+| 2. Dependable Practice Controls | 1/4 | In Progress|  |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |
 
