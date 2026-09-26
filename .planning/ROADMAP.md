@@ -30,7 +30,7 @@ Make the existing toss-apex cue dependable in both live-camera practice and save
 3. A fully observed eligible toss produces at most one automatic cue when timestamps repeat or five-frame windows overlap; the existing cooldown remains a separate eligibility rule.
 4. Delaying or removing pose observations cannot substitute a newer or stale body position for the toss sample's height gate; the corresponding valid pose or documented fallback determines the result.
 
-**Plans:** 2/3 plans executed across 3 sequential waves
+**Plans:** 3/3 plans executed across 3 sequential waves
 **Wave 1**
 
 - [x] 01-01-PLAN.md
@@ -41,7 +41,7 @@ Make the existing toss-apex cue dependable in both live-camera practice and save
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md
+- [x] 01-03-PLAN.md
 
 Planning notes:
 
@@ -137,7 +137,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Consistent Toss Cues | 2/3 | In Progress|  |
+| 1. Consistent Toss Cues | 3/3 | In Progress|  |
 | 2. Dependable Practice Controls | 0/TBD | Not started | - |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |
