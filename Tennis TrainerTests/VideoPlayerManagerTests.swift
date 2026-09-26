@@ -3,6 +3,18 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testReentrantNewerReplacementWinsOlderLoadReturn() {
+    var player: VideoPlayerManager!
+    player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {}, load: { url in
+      if url.lastPathComponent == "old.mov" {
+        player.loadVideo(from: URL(fileURLWithPath: "/new.mov"))
+        return 11
+      }
+      return 22
+    }))
+    player.loadVideo(from: URL(fileURLWithPath: "/old.mov"))
+    XCTAssertEqual(player.duration, 22, "Only the latest candidate may publish metadata")
+  }
   func testObserverAndTickCallbacksDoNotRetainManagerAfterOwnerExit() {
     var activeLoops = 0, activeObservers = 0
     var ticks: [() -> Void] = []
