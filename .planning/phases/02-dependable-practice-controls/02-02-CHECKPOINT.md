@@ -1,10 +1,10 @@
 ---
 phase: 02-dependable-practice-controls
 plan: "02"
-status: continuation-authorized
-completed_tasks: 1
+status: implementation-complete-hardware-pending
+completed_tasks: 2
 total_tasks: 2
-resume_task: 2
+resume_task: none
 updated: 2026-09-26
 ---
 
@@ -14,7 +14,7 @@ updated: 2026-09-26
 
 The user answered **Yes** to continuing Phase 2 implementation while deferring the remaining physical-device checks to the end of the phase. Resume Task 2, then execute plans 02-03 and 02-04. This explicitly changes checkpoint timing only: hardware results, six unresolved edge dispositions and the evidence-limit review remain pending. Do not change global auto-advance preferences or record a human test pass.
 
-Task 1 is committed and its automated checks pass. Task 2 has not started. This is a resumable tracer checkpoint, not a completion SUMMARY; do not advance the plan or dispatch 02-03 until 02-02 is completed. The orchestrator confirmed the checkpoint treatment after inspecting the canonical tracer rule.
+Both implementation tasks are now committed and their automated checks pass. Task 2 RED is `61b90e8`, GREEN is `e26cf38`; final evidence and interfaces are in `02-02-SUMMARY.md`. This checkpoint preserves the original timing decision and pending hardware procedure. Plan 02-03 can proceed; no hardware pass is recorded.
 
 ## Commits and execution evidence
 
@@ -50,11 +50,11 @@ Focused classes executed 10 camera tests and all 16 lifecycle tests. Full target
 
 Task 1's automated acceptance passes: undetermined/denied/restricted, Settings return grant/revocation, exact request/open/start counts, delayed grant through Stop/context exit, fresh Start, duplicate request/result ownership, and current OS snapshot at delivery. Existing acquired/queued frame, held analysis/publication and fresh-toss lifecycle tests remain green.
 
-Task 2 remains wholly pending: explicit CaptureState and actual session snapshots, configuration errors/idempotence, notification identity/current reconciliation, observer cleanup, bounded interruption/reset recovery/Retry, delayed physical-start cleanup, startup/recovery Stop UI and focused tests. Preserve operation/drain/admission boundaries; do not treat this checkpoint's simple `sessionConfigured` flag or Recording/Stopped label as completion of Task 2.
+Task 2 is complete: explicit CaptureState and backend snapshots, balanced/idempotent configuration with errors, owned notification reconciliation and observer cleanup, bounded recovery and explicit Retry, obsolete physical-start cleanup, and startup/recovery Stop UI. Final unit suite: 104/104; camera UI selectors: 2/2 across six scenarios; Release build passed. All tests have zero skips. See the SUMMARY for exact commands and artifacts.
 
 No new packages, network endpoints or media storage changes. New platform authorization and DEBUG injection boundaries are covered by T-02-05 and T-02-08; Task 2 owns T-02-06/07 completion. No new stubs or skipped tests were introduced. Physical capture/permission/audio claims are not established by injected tests.
 
-## Tracer gate requiring human disposition
+## Original tracer gate and deferred physical procedure
 
 Both `workflow.auto_advance` and `_auto_chain_active` are false. `human_verify_mode` is end-of-phase, but Task 1's tracer verify contains a genuine human-check. The canonical [tracer rule](/Users/vanshkumar/.codex/gsd-core/references/checkpoints.md) says the automated-only exception applies only when verify has no human-check; otherwise this tracer stops before expansion. Do not silently change auto flags or count synthetic Settings return as physical proof.
 
@@ -65,7 +65,7 @@ On a supported physical iPhone, record device, OS and build and observe:
 3. Revoke access in Settings and return. Confirm denied state, stopped capture and Open Settings again.
 4. If restriction testing is available, confirm the restriction explanation and no misleading request/Settings action. Record unavailable hardware or unsupported setup explicitly.
 
-The orchestrator may ask the user to defer this physical check to end-of-phase while continuing implementation. Such a timing decision must be explicit and must leave hardware evidence pending. Six unknown edge rows and the evidence-limit review also remain pending. No requirement checkbox or whole-phase status is completed by this checkpoint.
+The user explicitly deferred these checks to end-of-phase, as recorded above. Physical startup, Stop, interruption and return/retry also remain pending. Record unsupported interruption/restriction scenarios explicitly. Six unknown edge rows and the evidence-limit review remain pending. This timing disposition is not human acceptance of any physical behavior.
 
 ## Self-check: PASSED
 

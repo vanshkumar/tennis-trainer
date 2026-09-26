@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 1
+open_count: 3
 waived_count: 0
 fixed_count: 1
-total_count: 2
-last_updated: 2026-09-26T15:11:59.755Z
+total_count: 4
+last_updated: 2026-09-26T15:44:12.156Z
 ---
 
 # Broken Windows Ledger
@@ -17,6 +17,8 @@ last_updated: 2026-09-26T15:11:59.755Z
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 01 | lint-warning | Tennis TrainerTests/BallDetectionManagerTests.swift |  | Controlled semaphore-stall tests emit a Thread Performance Checker priority warning; no production timing inference. | open |  | 2026-09-26T04:30:36.746Z |  |
 | 2 | 02 | stub | Tennis Trainer/ContentView.swift | 209 | Inherited Request Permission action is empty; scheduled for plan 02-02. | fixed |  | 2026-09-26T14:59:53.671Z | 2026-09-26T15:11:59.755Z |
+| 3 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera permission request, Settings grant/revoke return, and supported restriction checks remain pending; user deferred to end of Phase 2. | open |  | 2026-09-26T15:44:12.034Z |  |
+| 4 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera startup, Stop, interruption and return/retry checks remain pending; injected events are not hardware evidence. | open |  | 2026-09-26T15:44:12.156Z |  |
 
 ````json
 [
@@ -44,6 +46,32 @@ last_updated: 2026-09-26T15:11:59.755Z
     "reason": "",
     "recorded_at": "2026-09-26T14:59:53.671Z",
     "resolved_at": "2026-09-26T15:11:59.755Z",
+    "milestone": null
+  },
+  {
+    "id": 3,
+    "kind": "unrun-verify",
+    "phase": "02",
+    "file": ".planning/phases/02-dependable-practice-controls/02-02-PLAN.md",
+    "line": null,
+    "description": "Physical camera permission request, Settings grant/revoke return, and supported restriction checks remain pending; user deferred to end of Phase 2.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T15:44:12.034Z",
+    "resolved_at": null,
+    "milestone": null
+  },
+  {
+    "id": 4,
+    "kind": "unrun-verify",
+    "phase": "02",
+    "file": ".planning/phases/02-dependable-practice-controls/02-02-PLAN.md",
+    "line": null,
+    "description": "Physical camera startup, Stop, interruption and return/retry checks remain pending; injected events are not hardware evidence.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T15:44:12.156Z",
+    "resolved_at": null,
     "milestone": null
   }
 ]
