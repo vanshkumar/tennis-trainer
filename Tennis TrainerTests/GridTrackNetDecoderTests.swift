@@ -22,10 +22,24 @@ final class GridTrackNetDecoderTests: XCTestCase {
     let window = try DecoderFixture.window()
     let outputs = try DecoderFixture.outputs()
     let detector = GridTrackNetDetector(predictor: { _ in outputs })
-    let wrong = try MLMultiArray(shape: [5, 48, 27], dataType: .float32)
-    XCTAssertNil(detector.decode(.init(conf: wrong, xOff: outputs.xOff, yOff: outputs.yOff), window: window))
-    outputs.conf[[0, 10, 3]] = NSNumber(value: Float.nan)
-    XCTAssertNil(detector.decode(outputs, window: window))
+    for type in [MLMultiArrayDataType.float32, .double, .int32] {
+      let wrong = try MLMultiArray(shape: [5, 48, 27], dataType: type)
+      XCTAssertNil(detector.decode(.init(conf: wrong, xOff: outputs.xOff, yOff: outputs.yOff), window: window))
+    }
+    for shape in [[5, 47, 27], [4, 48, 27], [5, 48, 27, 1], [5, 1296], [2, 5, 48, 27]] {
+      let wrong = try MLMultiArray(shape: shape.map(NSNumber.init), dataType: .float16)
+      XCTAssertNil(detector.decode(.init(conf: outputs.conf, xOff: wrong, yOff: outputs.yOff), window: window))
+    }
+    for head in 0..<3 {
+      for value in [Float.nan, .infinity, -.infinity] {
+        let malformed = try DecoderFixture.outputs()
+        [malformed.conf, malformed.xOff, malformed.yOff][head][0] = NSNumber(value: value)
+        XCTAssertNil(detector.decode(malformed, window: window))
+      }
+    }
+    let overlapping = try DecoderFixture.tensor(shape: [5, 48, 27], strides: [1, 1, 1])
+    XCTAssertNil(detector.decode(.init(conf: overlapping, xOff: outputs.xOff, yOff: outputs.yOff), window: window))
+    for count in 0..<5 { XCTAssertNil(AnalysisFrame.Window(Array(window.frames.prefix(count)))) }
   }
 
   func testSourceCoordinates_WhenPortraitFitOrNonportraitFill() throws {
@@ -71,12 +85,28 @@ final class GridTrackNetDecoderTests: XCTestCase {
     let arrays = try ["conf", "x_off", "y_off"].map { name -> MLMultiArray in
       let tensor = try XCTUnwrap(result.featureValue(for: name)?.multiArrayValue)
       XCTAssertEqual(tensor.dataType, .float16)
-      XCTAssertEqual(tensor.shape.map(\.intValue), [5, 48, 27])
+      XCTAssertEqual(tensor.shape.map(\.intValue), [1, 5, 48, 27])
       print("MODEL CONTRACT \(name): dtype=\(tensor.dataType.rawValue) shape=\(tensor.shape) strides=\(tensor.strides)")
       return tensor
     }
     let outputs = GridTrackNetDetector.RawOutputs(conf: arrays[0], xOff: arrays[1], yOff: arrays[2])
     XCTAssertEqual(GridTrackNetDetector(predictor: { _ in outputs }).decode(outputs, window: window)?.count, 5)
+  }
+
+  func testThresholdTiesAndOutOfSource_WhenOutputsAreValid() throws {
+    let window = try DecoderFixture.window()
+    let outputs = try AnalysisFixture.outputs()
+    for index in 0..<outputs.conf.count { outputs.conf[index] = 0 }
+    outputs.conf[[0, 2, 3]] = 0.5
+    outputs.conf[[0, 2, 4]] = 0.5
+    outputs.conf[[1, 2, 3]] = 0.499
+    outputs.conf[[2, 2, 3]] = 0.75
+    outputs.xOff[[2, 2, 3]] = -100
+    let samples = try XCTUnwrap(GridTrackNetDecoder.decode(outputs: outputs, window: window))
+    XCTAssertEqual(try XCTUnwrap(samples[0].position).x, 3.0 / 48, accuracy: 0.00001)
+    XCTAssertNil(samples[1].position)
+    XCTAssertNil(samples[2].position)
+    XCTAssertEqual(samples[1].metadata.identity, window.frames[1].metadata.identity)
   }
 }
 
