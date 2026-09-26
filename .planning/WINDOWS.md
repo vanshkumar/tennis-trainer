@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 1
 waived_count: 0
-fixed_count: 0
+fixed_count: 1
 total_count: 2
-last_updated: 2026-09-26T14:59:53.671Z
+last_updated: 2026-09-26T15:11:59.755Z
 ---
 
 # Broken Windows Ledger
@@ -16,7 +16,7 @@ last_updated: 2026-09-26T14:59:53.671Z
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 01 | lint-warning | Tennis TrainerTests/BallDetectionManagerTests.swift |  | Controlled semaphore-stall tests emit a Thread Performance Checker priority warning; no production timing inference. | open |  | 2026-09-26T04:30:36.746Z |  |
-| 2 | 02 | stub | Tennis Trainer/ContentView.swift | 209 | Inherited Request Permission action is empty; scheduled for plan 02-02. | open |  | 2026-09-26T14:59:53.671Z |  |
+| 2 | 02 | stub | Tennis Trainer/ContentView.swift | 209 | Inherited Request Permission action is empty; scheduled for plan 02-02. | fixed |  | 2026-09-26T14:59:53.671Z | 2026-09-26T15:11:59.755Z |
 
 ````json
 [
@@ -40,10 +40,10 @@ last_updated: 2026-09-26T14:59:53.671Z
     "file": "Tennis Trainer/ContentView.swift",
     "line": 209,
     "description": "Inherited Request Permission action is empty; scheduled for plan 02-02.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-09-26T14:59:53.671Z",
-    "resolved_at": null,
+    "resolved_at": "2026-09-26T15:11:59.755Z",
     "milestone": null
   }
 ]

@@ -9,6 +9,45 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
 
+    @MainActor
+    func testCameraPermissionControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "permission-undetermined"]
+        app.launch()
+        let permission = app.buttons["camera.permissionAction"]
+        XCTAssertTrue(permission.waitForExistence(timeout: 5))
+        XCTAssertEqual(permission.label, "Request Permission")
+        permission.tap()
+        XCTAssertEqual(app.staticTexts["camera.permissionStatus"].label, "Requesting access…")
+        XCTAssertFalse(permission.isEnabled)
+        let capture = app.buttons["camera.captureAction"]
+        XCTAssertTrue(capture.waitForExistence(timeout: 5))
+        XCTAssertEqual(capture.label, "Start")
+        capture.tap()
+        XCTAssertEqual(capture.label, "Stop")
+        capture.tap()
+        XCTAssertEqual(capture.label, "Start")
+        app.terminate()
+
+        app.launchArguments = ["--practice-ui-scenario", "permission-denied-return"]
+        app.launch()
+        XCTAssertTrue(permission.waitForExistence(timeout: 5))
+        XCTAssertEqual(permission.label, "Open Settings")
+        permission.tap()
+        XCTAssertTrue(capture.waitForExistence(timeout: 5))
+        XCTAssertEqual(capture.label, "Start")
+        XCTAssertEqual(app.staticTexts["camera.captureStatus"].label, "Status: Stopped")
+        app.terminate()
+
+        app.launchArguments = ["--practice-ui-scenario", "permission-restricted"]
+        app.launch()
+        XCTAssertTrue(app.staticTexts["camera.permissionStatus"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["camera.permissionStatus"].label, "Camera access is restricted")
+        XCTAssertFalse(permission.exists)
+        XCTAssertFalse(capture.exists)
+        XCTAssertTrue(app.staticTexts["Camera access is controlled by device restrictions. Contact the device owner or administrator."].exists)
+    }
+
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 

@@ -14,7 +14,7 @@ enum AppMode: String, CaseIterable {
 }
 
 struct ContentView: View {
-    @StateObject private var cameraManager = CameraManager()
+    @StateObject private var cameraManager = AppRuntime.makeCameraManager()
     @StateObject private var audioManager = AudioManager()
     @StateObject private var cameraPoseManager = PoseDetectionManager()
     @StateObject private var playbackPoseManager = PoseDetectionManager()
@@ -37,6 +37,7 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(SegmentedPickerStyle())
+            .accessibilityIdentifier("practice.mode")
             .padding()
             .onChange(of: currentMode) { _, newMode in
                 handleModeChange(to: newMode)
@@ -113,8 +114,12 @@ struct ContentView: View {
         ZStack {
             if cameraManager.hasPermission {
                 ZStack {
-                    CameraPreview(previewLayer: cameraManager.getPreviewLayer())
-                        .ignoresSafeArea()
+                    if AppRuntime.practiceUIScenario == nil {
+                        CameraPreview(previewLayer: cameraManager.getPreviewLayer())
+                            .ignoresSafeArea()
+                    } else {
+                        Color.black.ignoresSafeArea()
+                    }
                     
                     // Right arm joint overlays
                     GeometryReader { geometry in
@@ -151,6 +156,7 @@ struct ContentView: View {
                                 .foregroundColor(.white)
                                 .font(.caption)
                             Text("Status: \(cameraManager.isRecording ? "Recording" : "Stopped")")
+                                .accessibilityIdentifier("camera.captureStatus")
                                 .foregroundColor(.white)
                                 .font(.caption)
                         }
@@ -189,6 +195,7 @@ struct ContentView: View {
                         .background(cameraManager.captureRequested ? Color.red : Color.green)
                         .foregroundColor(.white)
                         .clipShape(Circle())
+                        .accessibilityIdentifier("camera.captureAction")
                         
                         Button("Test Beep") {
                             audioManager.playBeep()
@@ -202,16 +209,28 @@ struct ContentView: View {
                 }
             } else {
                 VStack {
-                    Text("Camera permission required")
+                    Text(cameraManager.accessState.message)
+                        .accessibilityIdentifier("camera.permissionStatus")
                         .foregroundColor(.red)
                         .font(.title2)
-                    Button("Request Permission") {
-                        // This will trigger the permission request
+                    if cameraManager.accessState == .restricted {
+                        Text("Camera access is controlled by device restrictions. Contact the device owner or administrator.")
+                            .multilineTextAlignment(.center)
+                            .padding()
+                    } else if cameraManager.accessState == .denied {
+                        Button("Open Settings") { cameraManager.openSettings() }
+                            .accessibilityIdentifier("camera.permissionAction")
+                            .buttonStyle(.borderedProminent)
+                    } else if cameraManager.accessState == .undetermined || cameraManager.accessState == .requesting {
+                        Button("Request Permission") { cameraManager.requestAccess() }
+                            .disabled(cameraManager.accessState == .requesting)
+                            .accessibilityIdentifier("camera.permissionAction")
+                            .buttonStyle(.borderedProminent)
                     }
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
+                    if cameraManager.captureRequested {
+                        Button("Stop") { cameraManager.stopCapture() }
+                            .accessibilityIdentifier("camera.captureAction")
+                    }
                 }
             }
         }

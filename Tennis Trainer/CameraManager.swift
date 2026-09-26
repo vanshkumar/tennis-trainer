@@ -3,6 +3,21 @@ import SwiftUI
 import Vision
 
 final class CameraManager: NSObject, ObservableObject {
+    enum AccessState: Equatable {
+      case undetermined, requesting, authorized, denied, restricted, unavailable
+
+      var message: String {
+        switch self {
+        case .undetermined: return "Camera permission required"
+        case .requesting: return "Requesting access…"
+        case .authorized: return "Camera access granted"
+        case .denied: return "Camera access denied"
+        case .restricted: return "Camera access is restricted"
+        case .unavailable: return "Camera access is unavailable"
+        }
+      }
+    }
+
     struct Dependencies {
       var session: (@escaping () -> Void) -> Void
       var drain: (@escaping () -> Void) -> Void
@@ -11,11 +26,18 @@ final class CameraManager: NSObject, ObservableObject {
       var attach: (Bool) -> Void
       var start: () -> Bool
       var beforeAdmission: () -> Void = {}
+      var authorization: () -> AVAuthorizationStatus = { .authorized }
+      var requestAuthorization: (@escaping (Bool) -> Void) -> Void = { _ in }
+      var openSettings: () -> Void = {}
     }
 
     @Published var isRecording = false
     @Published private(set) var captureRequested = false
-    @Published var hasPermission = false
+    @Published private(set) var accessState: AccessState = .undetermined
+    var hasPermission: Bool { accessState == .authorized }
+    private var authorizationRequest: UUID?
+    private var waitingForAuthorization = false
+    private var sessionConfigured = false
     
     private lazy var captureSession = AVCaptureSession()
     private lazy var videoOutput = AVCaptureVideoDataOutput()
@@ -45,7 +67,7 @@ final class CameraManager: NSObject, ObservableObject {
           self.dependencies = dependencies
         } else if AppRuntime.isRunningTests {
           self.dependencies = Dependencies(session: { $0() }, drain: { $0() }, state: { $0() },
-            stop: {}, attach: { _ in }, start: { false })
+            stop: {}, attach: { _ in }, start: { false }, authorization: { .notDetermined })
         } else {
           self.dependencies = Dependencies(
             session: { [weak self] in self?.sessionQueue.async(execute: $0) },
@@ -60,40 +82,60 @@ final class CameraManager: NSObject, ObservableObject {
                 queue: attached ? self.videoProcessingQueue : nil)
             }, start: { [weak self] in
               guard let self, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return false }
+              if !self.sessionConfigured {
+                self.configureSession()
+                self.sessionConfigured = true
+              }
               if !self.captureSession.isRunning { self.captureSession.startRunning() }
               return self.captureSession.isRunning
+            }, authorization: { AVCaptureDevice.authorizationStatus(for: .video) },
+            requestAuthorization: { AVCaptureDevice.requestAccess(for: .video, completionHandler: $0) },
+            openSettings: {
+              guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+              UIApplication.shared.open(url)
             })
-          checkPermissions()
         }
+        refreshAuthorization()
     }
     
-    private func checkPermissions() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
-        case .authorized:
-            hasPermission = true
-            setupCamera()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async {
-                    self.hasPermission = granted
-                    if granted {
-                        self.setupCamera()
-                    }
-                }
-            }
-        case .denied:
-            hasPermission = false
-        case .restricted:
-            hasPermission = false
-        @unknown default:
-            hasPermission = false
+    func refreshAuthorization() {
+      switch dependencies.authorization() {
+      case .authorized: accessState = .authorized
+      case .notDetermined: accessState = authorizationRequest == nil ? .undetermined : .requesting
+      case .denied: accessState = .denied
+      case .restricted: accessState = .restricted
+      @unknown default: accessState = .unavailable
+      }
+      if hasPermission {
+        if waitingForAuthorization && captureRequested && contextActive {
+          waitingForAuthorization = false
+          beginCapture()
         }
+      } else if accessState != .undetermined && accessState != .requesting {
+        stopCapture()
+      }
     }
-    
-    private func setupCamera() {
-        sessionQueue.async {
-            self.configureSession()
+
+    func requestAccess() {
+      refreshAuthorization()
+      guard contextActive, accessState == .undetermined, authorizationRequest == nil else { return }
+      let request = UUID()
+      authorizationRequest = request
+      accessState = .requesting
+      dependencies.requestAuthorization { [weak self] _ in
+        self?.dependencies.state { [weak self] in
+          guard let self, self.authorizationRequest == request else { return }
+          self.authorizationRequest = nil
+          // The OS snapshot wins over an old callback's Boolean, including revocation.
+          self.refreshAuthorization()
         }
+      }
+    }
+
+    func openSettings() {
+      refreshAuthorization()
+      guard accessState == .denied else { return }
+      dependencies.openSettings()
     }
     
     private func configureSession() {
@@ -167,7 +209,18 @@ final class CameraManager: NSObject, ObservableObject {
     
     func startCapture() {
       guard contextActive, !captureRequested else { return }
+      refreshAuthorization()
+      guard hasPermission || accessState == .undetermined || accessState == .requesting else { return }
       captureRequested = true
+      if !hasPermission {
+        waitingForAuthorization = true
+        requestAccess()
+        return
+      }
+      beginCapture()
+    }
+
+    private func beginCapture() {
       let current = UUID()
       frameProcessingLock.lock()
       operation = current
@@ -185,10 +238,16 @@ final class CameraManager: NSObject, ObservableObject {
           guard let self else { return }
           self.dependencies.session { [weak self] in
             guard let self, self.isCurrentOperation(current) else { return }
+            guard self.dependencies.authorization() == .authorized else {
+              self.dependencies.state { [weak self] in self?.refreshAuthorization() }
+              return
+            }
             self.dependencies.attach(true)
             let running = self.dependencies.start()
             self.dependencies.state { [weak self] in
               guard let self, self.isCurrentOperation(current) else { return }
+              self.refreshAuthorization()
+              guard self.hasPermission, self.isCurrentOperation(current) else { return }
               self.isRecording = running
               let generation = self.ballDetectionManager?.admissionGeneration
               self.frameProcessingLock.lock()
@@ -209,6 +268,7 @@ final class CameraManager: NSObject, ObservableObject {
       frameProcessingLock.unlock()
       ballDetectionManager?.resetTrackingState()
       captureRequested = false
+      waitingForAuthorization = false
       isRecording = false
       dependencies.session { [weak self] in
         self?.dependencies.stop()
@@ -219,6 +279,7 @@ final class CameraManager: NSObject, ObservableObject {
     func setContextActive(_ active: Bool) {
       contextActive = active
       if !active { stopCapture() }
+      else { refreshAuthorization() }
     }
     
     func getPreviewLayer() -> AVCaptureVideoPreviewLayer {
