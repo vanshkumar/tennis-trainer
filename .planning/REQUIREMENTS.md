@@ -28,8 +28,10 @@ Here, v1 means the first GSD reliability milestone in this existing application.
 
 ### Camera Access and State
 
-- [ ] **CAM-01**: A player can request camera access when undetermined, reach Settings when denied, understand restricted access, and have access rechecked on return.
-- [ ] **CAM-02**: A player sees the actual capture state and can stop safely during startup, interruption, or recovery without a later completion restarting analysis against their intent.
+CAM-01/02 checkboxes record completed implementation and passing automated checks in 02-02. Physical permission/Settings, startup/interruption/Stop/recovery and Phase 2 human acceptance remain pending under the user's explicit end-of-phase timing decision; these are not hardware acceptance marks.
+
+- [x] **CAM-01**: A player can request camera access when undetermined, reach Settings when denied, understand restricted access, and have access rechecked on return.
+- [x] **CAM-02**: A player sees the actual capture state and can stop safely during startup, interruption, or recovery without a later completion restarting analysis against their intent.
 
 ### Saved-Video Controls
 
@@ -92,8 +94,8 @@ Each v1 requirement maps to exactly one owning phase in the approved roadmap; ot
 | LIFE-02 | Phase 2 | Pending |
 | VIEW-01 | Phase 3 | Pending |
 | VIEW-02 | Phase 3 | Pending |
-| CAM-01 | Phase 2 | Pending |
-| CAM-02 | Phase 2 | Pending |
+| CAM-01 | Phase 2 | Complete |
+| CAM-02 | Phase 2 | Complete |
 | PLAY-01 | Phase 2 | Pending |
 | PLAY-02 | Phase 2 | Pending |
 | PLAY-03 | Phase 2 | Pending |
