@@ -3,6 +3,18 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testSeekImmediatelyClosesProductionFrameIngress() throws {
+    let fixture = try PlaybackFixture()
+    fixture.play()
+    fixture.player.duration = 30
+    fixture.player.seek(to: 5)
+    XCTAssertFalse(fixture.player.isPlaying, "Seek must wait for current completion")
+    fixture.pipeline.flush()
+    fixture.offer(1)
+    fixture.pipeline.flush()
+    XCTAssertEqual(fixture.frames, 0, "Unsettled seek cannot process frames")
+  }
+
   func testInterruptionInvalidatesHeldWorkAndRecoveryRequiresFreshTossWindow() throws {
     for holdPublication in [false, true] {
       let fixture = CaptureFixture()
