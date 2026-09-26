@@ -7,6 +7,9 @@ Technical and implementation references that support the codebase.
 - `../../GRIDTRACKNET_COREML.md`
   GridTrackNet conversion, model I/O, decode rules, and maintenance notes.
 
+- `toss-cue-validation.md`
+  Baseline provenance, deterministic cue and resource-bound checks, and outstanding clip/device/audio evidence.
+
 ## When To Add Here
 
 Add a reference entry when the document is:

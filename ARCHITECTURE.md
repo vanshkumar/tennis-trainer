@@ -28,7 +28,9 @@ The repository is now aligned around the serve-training product:
 - `Tennis Trainer/PoseDetectionManager.swift`
   Runs Vision pose detection and exposes tracked joints plus retained arm-angle helpers for future stroke work.
 - `Tennis Trainer/BallDetectionManager.swift`
-  Chooses the active ball detector backend and exposes the current ball position plus optional track callbacks.
+  Chooses the active ball detector backend, admits one analysis job through publication, and exposes ball tracking plus the automatic toss cue.
+- `Tennis Trainer/AnalysisFrame.swift`
+  Owns prepared frame pixels and immutable source identity, rational media time, orientation, geometry, and pose metadata for a five-frame prediction window.
 - `Tennis Trainer/Detectors/GridTrackNetDetector.swift`
   Core ML wrapper for the 5-frame GridTrackNet model.
 - `Tennis Trainer/Detectors/ColorKalmanBallDetector.swift`
@@ -45,23 +47,19 @@ The repository is now aligned around the serve-training product:
 ### Live Camera
 
 1. `ContentView` creates `CameraManager`, `PoseDetectionManager`, and `AudioManager`.
-2. `CameraManager` receives camera frames from `AVCaptureVideoDataOutput`.
-3. Each frame is sent to:
-   - `PoseDetectionManager.detectPose(...)`
-   - `BallDetectionManager.process(...)`
-4. `BallDetectionManager` feeds `ServeTossApexDetector` from `onBallTrack`.
-5. `BallDetectionManager` emits `onApex` when the toss peak is confirmed.
+2. `CameraManager` receives frames from `AVCaptureVideoDataOutput` and supplies the sample buffer's presentation timestamp to `BallDetectionManager`.
+3. The manager admits at most one job before scheduling pose extraction and ball analysis. New frames are dropped while that job or its publication is pending.
+4. Pose extraction and ball preparation use the same admitted image. GridTrackNet predicts from an owned five-frame window, whose decoded samples retain their original metadata.
+5. The manager publishes current results, feeds `ServeTossApexDetector`, and emits `onApex` when an eligible toss peak is confirmed. Its admission lease remains held through publication.
 6. `ContentView` receives the apex callback and calls `AudioManager.playBeep()`.
 
 ### Video Playback
 
 1. `VideoPlayerManager` loads a local video into `AVPlayer`.
-2. `AVPlayerItemVideoOutput` exposes the current frame on each display-link tick.
-3. Each frame is sent to:
-   - `PoseDetectionManager.detectPose(...)`
-   - `BallDetectionManager.process(..., timestamp:)`
-4. `BallDetectionManager` feeds `ServeTossApexDetector` from `onBallTrack`.
-5. `BallDetectionManager` emits `onApex` when the toss peak is confirmed.
+2. `AVPlayerItemVideoOutput` exposes a frame on each display-link tick. Analysis uses the acquired frame's returned display time, rather than the requested player time.
+3. `VideoPlayerManager` submits the image, media time, and orientation to the same bounded `BallDetectionManager` pipeline used for live capture.
+4. The manager rejects invalid or repeated media times before expensive work, extracts matching pose, and analyzes an owned prediction window.
+5. Current publication feeds `ServeTossApexDetector` and emits `onApex` for an eligible peak.
 6. `ContentView` receives the apex callback and calls `AudioManager.playBeep()`.
 
 ## Detection Boundaries
@@ -79,15 +77,17 @@ The repository is now aligned around the serve-training product:
 
 - Implemented with `VNDetectHumanBodyPoseRequest`.
 - Current tracked joints cover the right arm plus `nose`/`neck` for the toss height gate.
-- `detectedPose` is shared UI/runtime state for overlays and cue logic.
+- The shared Vision request is serialized. Extraction returns a frame-tagged value; missing or invalid pose is explicit.
+- `detectedPose` is presentation state for overlays. Cue eligibility uses the candidate frame's own pose metadata, not the latest overlay pose. Missing or mismatched pose uses the existing strict height fallback.
 
 ### Ball
 
 - Backend is selected by `AppConfig.ballDetectionMethod`.
 - Default path is `gridTrackNet`.
-- `GridTrackNetDetector` keeps a 5-frame temporal window, applies caller-provided frame orientation, and emits one decoded sample per frame index.
-- `BallDetectionManager.onBallTrack` remains the seam for higher-level detectors.
-- `ServeTossApexDetector` is the first consumer wired onto that seam and emits the live cue through `BallDetectionManager.onApex`.
+- `GridTrackNetDetector` prepares app-owned pixels, applies caller-provided frame orientation, and predicts from an immutable five-frame window. Each decoded sample carries its originating frame's metadata.
+- `BallDetectionManager.onBallTrack` remains an optional observation callback; the manager also feeds its built-in `ServeTossApexDetector` during guarded publication.
+- `ServeTossApexDetector` consumes each source identity once, retains three samples for peak evaluation, and keeps its rational-time watermark after history eviction. The four-second cue cooldown is a separate rule.
+- Manager-authorized source/generation resets invalidate old publication and reset the cue identity domain. Complete camera and playback control-transition acceptance belongs to Phase 2 of the reliability roadmap.
 
 ## Architectural Boundaries
 
@@ -103,3 +103,4 @@ The codebase is small, so the main boundary to preserve is responsibility separa
 - `README.md` for the user-facing product framing
 - `PRD.MD` for current product behavior/spec
 - `GRIDTRACKNET_COREML.md` for model conversion and decode details
+- `docs/references/toss-cue-validation.md` for the preserved baseline, deterministic evidence, resource bounds, and outstanding clip/device/audio measurements

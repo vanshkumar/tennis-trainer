@@ -27,84 +27,62 @@ Inputs (five images):
 - Recommended: pass BGRA `CVPixelBuffer`s directly; Core ML converts BGRA→RGB internally.
 
 Outputs (three tensors):
-- `conf`: confidence grids, shape `[5, 48, 27]` (Float16 in the shipped mlpackage).
-- `x_off`: X offsets (grid units), shape `[5, 48, 27]`.
-- `y_off`: Y offsets (grid units), shape `[5, 48, 27]`.
+- `conf`: confidence grids, shape `[1, 5, 48, 27]` (Float16 in the bundled-model smoke test).
+- `x_off`: X offsets (grid units), same shape and dtype.
+- `y_off`: Y offsets (grid units), same shape and dtype.
+- The leading dimension is batch size 1. The logical axes are temporal, width, height. The decoder validates each head independently and also accepts the tested unbatched and height/width storage variants; never assume shared strides.
 
 Geometry
 - Input spatial size inside the model: 768 (W) × 432 (H).
 - Grid size: 48 × 27, so cell size = 16 px (both axes).
 
 Pixel mapping (per frame index `t`):
-- Find `(row, col)` of `argmax(conf[t, :, :])`.
-- `x_px = (col + x_off[t, row, col]) * 16`
-- `y_px = (row + y_off[t, row, col]) * 16`
-- Suggested detection threshold: `conf[t, row, col] ≥ 0.5`.
-- Normalize if needed: `x_norm = x_px / 768`, `y_norm = y_px / 432`.
+- Find the winning `(row, col)` using each tensor’s declared axes and strides. For the bundled width-first layout, storage indices are `[0, t, col, row]`.
+- `x_px = (col + x_offset) * 16`, `y_px_from_top = (row + y_offset) * 16`.
+- Confidence threshold is `0.5`. Non-finite values or malformed storage reject the result.
+- Use the originating frame’s mapping to reverse fit/fill preprocessing and convert to normalized source coordinates with a bottom-left origin. Points outside the source image, including portrait padding, are rejected.
 
 Resizing
 - Camera frames like 1920×1080 must be resized to 768×432 before prediction (same 16:9 aspect).
-- Use Core Image (`CILanczosScaleTransform`) or vImage; avoid letterboxing so behavior matches the repo.
-- App note: portrait-oriented sources are first orientation-normalized, then fit into the 768×432 canvas to preserve the full toss arc. Decoded coordinates are mapped back to the oriented source frame.
+- The app orientation-normalizes each admitted image, then uses aspect-fit for portrait sources and aspect-fill for nonportrait sources. Preserve this distinction.
+- Prepared pixels are app-owned; the five-frame snapshot retains their matching geometry, time, identity, and pose. Decoded coordinates map back to the oriented source frame.
 
-## Swift Usage (Core ML directly)
+## Swift Usage
+
+The application uses `GridTrackNetDetector` to load the model, construct the five-image provider from an owned `AnalysisFrame.Window`, and decode against that same window. Keep raw tensor indexing in the tested decoder rather than copying pointer examples into callers.
+
+Inside the app target, decoding the three model outputs uses:
+
 ```swift
-import CoreML
-
-let cfg = MLModelConfiguration()
-cfg.computeUnits = .all
-let model = try GridTrackNet5(configuration: cfg)
-
-// Provide five consecutive frames, each resized to 768×432 BGRA CVPixelBuffers
-let provider = try MLDictionaryFeatureProvider(dictionary: [
-  "f1": .init(pixelBuffer: pb1),
-  "f2": .init(pixelBuffer: pb2),
-  "f3": .init(pixelBuffer: pb3),
-  "f4": .init(pixelBuffer: pb4),
-  "f5": .init(pixelBuffer: pb5),
-])
-let out = try model.model.prediction(from: provider)
-
-let conf  = out.featureValue(for: "conf")!.multiArrayValue! // shape [5,48,27]
-let xOff  = out.featureValue(for: "x_off")!.multiArrayValue!
-let yOff  = out.featureValue(for: "y_off")!.multiArrayValue!
-
-// Example: argmax on frame t=2 and map to pixels
-let gridW = 48, gridH = 27
-let s = conf.strides.map { Int(truncating: $0) }
-
-// Note: outputs are Float16 in the packaged model; read accordingly.
-let pcBits = conf.dataPointer.bindMemory(to: UInt16.self, capacity: conf.count)
-let pxBits = xOff.dataPointer.bindMemory(to: UInt16.self, capacity: xOff.count)
-let pyBits = yOff.dataPointer.bindMemory(to: UInt16.self, capacity: yOff.count)
-@inline(__always) func f16(_ u: UInt16) -> Float32 { Float32(Float16(bitPattern: u)) }
-
-func idx(_ t:Int,_ r:Int,_ c:Int)->Int { t*s[0] + r*s[1] + c*s[2] }
-var best: Float32 = -1; var br = 0; var bc = 0
-for r in 0..<gridH { for c in 0..<gridW {
-  let v = f16(pcBits[idx(2,r,c)]); if v > best { best = v; br = r; bc = c }
-}}
-if best >= 0.5 {
-  let x = (Float32(bc) + f16(pxBits[idx(2,br,bc)])) * 16
-  let y = (Float32(br) + f16(pyBits[idx(2,br,bc)])) * 16
-  // map (x,y) from 768×432 to your view space as needed
+// window is the exact owned snapshot supplied to this prediction.
+let outputs = GridTrackNetDetector.RawOutputs(
+  conf: conf,
+  xOff: xOff,
+  yOff: yOff
+)
+guard let samples = GridTrackNetDecoder.decode(outputs: outputs, window: window) else {
+  // Malformed output: publish no detection.
+  return
 }
 ```
+
+`GridTrackNetDecoder` checks FP16 dtype, supported shape, positive non-overlapping strides, overflow-safe storage span, and finite values using scoped byte access. It reads each head using that head’s own strides. `GridTrackNetDecoderTests` contains synthetic fixtures and a separate bundled-model smoke test.
 
 Why Core ML directly (not Vision)
 - Vision’s `VNCoreMLRequest` is optimized for single-image models; multi-input (5 frames) is simpler via `MLModel.prediction` with a keyed dictionary.
 
 ## Usage Pattern (recommended)
-- Maintain a 5-frame ring buffer of consecutive frames (consistent spacing: e.g., every frame at 60 fps, or every other at 120 fps).
-- On each new frame, populate `f1…f5` and run one prediction.
-- Target frame selection: use the middle frame `t=2` (0-based in `f1…f5`) for accuracy (best for contact/change-of-direction). This leverages two past and two future frames, with ~2-frame latency (~33 ms @60 fps). Controlled by `targetFrameIndex` in `Tennis Trainer/Detectors/GridTrackNetDetector.swift` (default `2`).
+- Maintain five admitted frames in oldest-to-newest order. Busy analysis drops arriving frames before expensive work; actual temporal spacing can therefore be irregular and must remain visible in media timestamps.
+- Predict once the owned window is full; overlapping windows reuse the four retained prepared frames.
+- The decoder emits all five samples for cue evaluation. The displayed ball uses `t=4`; the cue detector consumes each source identity once and evaluates the middle of its three-entry history. There is no fixed analyzed-FPS or physical-audio-latency guarantee.
+- See `docs/references/toss-cue-validation.md` for source/model provenance, regression evidence, and pending empirical checks.
 
 ## Gotchas / Tips
 - Do not re-normalize inputs in Swift (model already applies 1/255 scale).
-- Keep orientation consistent (landscape). Avoid letterboxing inside the pixel buffer; pre-resize if you need exact framing.
+- Keep frame orientation and its stored mapping associated. Portrait fit padding and nonportrait fill cropping are intentional current behavior.
 - Temporal alignment matters: the 5 frames should be contiguous and similarly spaced; avoid per-frame recentered crops.
 - Grid is width=48, height=27 (cell size 16 px). Do not swap axes when decoding.
-- Outputs are Float16; if you read via pointers, convert from Float16 to Float32. Using each tensor’s own strides is required.
+- Outputs are Float16; use the validated decoder’s scoped byte access and each tensor’s own strides.
 - Performance: FP16 + `computeUnits = .all` enables Neural Engine/GPU where available. Using a sliding window (reuse 4 frames) reduces memory copies.
 
 ## Maintenance
