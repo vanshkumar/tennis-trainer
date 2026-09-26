@@ -45,6 +45,9 @@ final class VideoPlayerManager: ObservableObject {
     private var seekID: UUID?
     private var failedSeekTarget: Double?
     private var hasLoadedItem = false
+    private var media: VideoImportManager.MediaHandle?
+    private var replacementID: UUID?
+    @Published private(set) var importMessage: String?
     private var retireTicks: (() -> Void)?
     private var retireTime: (() -> Void)?
     private var displayTarget: DisplayTarget?
@@ -106,22 +109,66 @@ final class VideoPlayerManager: ObservableObject {
     var onApex: (() -> Void)?
     
     func loadVideo(from url: URL) {
+        loadVideo(.external(url), request: beginReplacement())
+    }
+
+    @discardableResult
+    func beginReplacement() -> UUID {
+        pause()
+        seekID = nil
+        if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
+        let request = UUID()
+        replacementID = request
+        isLoading = true
+        importMessage = nil
+        return request
+    }
+
+    func cancelReplacement() {
+        replacementID = nil
+        isLoading = false
+        importMessage = "Video selection cancelled. Choose another video."
+    }
+
+    func acceptImport(_ outcome: VideoImportManager.Outcome, request: UUID) {
+        guard replacementID == request else { return }
+        switch outcome {
+        case .selected(let handle): loadVideo(handle, request: request)
+        case .cancelled: cancelReplacement()
+        case .failed:
+          replacementID = nil
+          isLoading = false
+          importMessage = "Video could not be imported. Choose another video."
+        }
+    }
+
+    func loadVideo(_ handle: VideoImportManager.MediaHandle, request: UUID) {
+        guard replacementID == request else { return }
+        let url = handle.url
+        if let dependencies {
+          guard let seconds = dependencies.load(url), seconds.isFinite, seconds > 0 else {
+            replacementID = nil
+            isLoading = false
+            importMessage = "Video could not load. Choose another video."
+            return
+          }
+          cleanup()
+          media = handle
+          sourceID = UUID()
+          ballDetectionManager?.resetTrackingState(sourceID: sourceID)
+          duration = seconds
+          hasLoadedItem = true
+          playbackState = .paused
+          setupTimeObserver()
+          return
+        }
         // Clean up previous player
         cleanup()
+        media = handle
         let load = loadID
         isLoading = true
         sourceID = UUID()
         ballDetectionManager?.resetTrackingState(sourceID: sourceID)
-        if let dependencies {
-          if let seconds = dependencies.load(url), seconds.isFinite, seconds > 0 {
-            duration = seconds
-            hasLoadedItem = true
-            playbackState = .paused
-            setupTimeObserver()
-          } else { playbackState = .failed("Video could not load") }
-          isLoading = false
-          return
-        }
         
         let asset = AVAsset(url: url)
         playerItem = AVPlayerItem(asset: asset)
@@ -137,6 +184,7 @@ final class VideoPlayerManager: ObservableObject {
         setupTimeObserver()
         
         Task {
+            defer { withExtendedLifetime(handle) {} }
             do {
                 let duration = try await asset.load(.duration)
                 let isPlayable = try await asset.load(.isPlayable)
@@ -346,7 +394,7 @@ final class VideoPlayerManager: ObservableObject {
 
     func setContextActive(_ active: Bool) {
       contextActive = active
-      if !active { pause() }
+      if !active { cancelReplacement(); pause() }
     }
     
     // Method to refresh player layer connection if needed
@@ -497,6 +545,7 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     private func cleanup() {
+        replacementID = nil
         loadID = UUID()
         seekID = nil
         failedSeekTarget = nil
@@ -523,6 +572,7 @@ final class VideoPlayerManager: ObservableObject {
         
         player = nil
         playerItem = nil
+        media = nil
         isPlaying = false
         currentTime = 0
         duration = 0

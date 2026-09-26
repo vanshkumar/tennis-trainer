@@ -3,6 +3,94 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoImportManagerTests: XCTestCase {
+  func testCopyOccursInsideProviderLifetimeAndCurrentImportLoadsPausedPlayer() {
+    var inCallback = false
+    var copied: [URL] = [], removed: [URL] = []
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, destination in
+      XCTAssertTrue(inCallback)
+      copied.append(destination)
+    }, remove: { removed.append($0) }, state: { $0() }))
+    let player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {}))
+    let request = player.beginReplacement()
+    importer.begin(request: request) { player.acceptImport($1, request: $0) }
+    importer.receiveSelection(request: request) { completion in
+      inCallback = true
+      completion(URL(fileURLWithPath: "/provider/clip.mov"), nil)
+      inCallback = false
+      return Progress()
+    }
+    XCTAssertEqual(player.duration, 30)
+    XCTAssertEqual(player.playbackState, .paused)
+    XCTAssertFalse(importer.isImporting)
+    XCTAssertTrue(removed.isEmpty)
+    player.shutdown()
+    XCTAssertEqual(removed, copied)
+  }
+
+  func testSameBasenameCopiesAreUniqueAndFinalConsumerOwnsRelease() {
+    var copied: [URL] = [], removed: [URL] = []
+    var handles: [VideoImportManager.MediaHandle] = []
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, url in copied.append(url) },
+      remove: { removed.append($0) }, state: { $0() }))
+    for _ in 0..<2 {
+      let request = UUID()
+      importer.begin(request: request) { _, outcome in
+        if case .selected(let handle) = outcome { handles.append(handle) }
+      }
+      importer.receiveSelection(request: request) { completion in
+        completion(URL(fileURLWithPath: "/provider/same.mov"), nil)
+        return Progress()
+      }
+    }
+    XCTAssertEqual(Set(copied).count, 2)
+    var consumer: VideoImportManager.MediaHandle? = handles[0].lease()
+    handles.removeAll()
+    XCTAssertEqual(removed, [copied[1]])
+    XCTAssertNotNil(consumer)
+    consumer = nil
+    XCTAssertEqual(Set(removed), Set(copied))
+  }
+
+  func testCancelledStaleAndFailedProviderResultsPreserveSelectionAndOriginals() {
+    var removed: [URL] = [], copied: [URL] = []
+    var state: [() -> Void] = []
+    var callback: ((URL?, Error?) -> Void)?
+    let progress = Progress()
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, url in copied.append(url) },
+      remove: { removed.append($0) }, state: { state.append($0) }))
+    var completions = 0
+    let old = UUID()
+    importer.begin(request: old) { _, _ in completions += 1 }
+    importer.receiveSelection(request: old) { callback = $0; return progress }
+    importer.cancel()
+    XCTAssertTrue(progress.isCancelled)
+    callback?(URL(fileURLWithPath: "/provider/clip.mov"), nil)
+    let current = UUID()
+    importer.begin(request: current) { _, outcome in
+      if case .cancelled = outcome { completions += 1 } else { XCTFail("Expected cancellation") }
+    }
+    while !state.isEmpty { state.removeFirst()() }
+    XCTAssertEqual(completions, 0)
+    XCTAssertEqual(removed, copied)
+    importer.receiveSelection(request: current, provider: nil)
+    XCTAssertEqual(completions, 1)
+    XCTAssertFalse(removed.contains(URL(fileURLWithPath: "/provider/clip.mov")))
+  }
+
+  func testCopyFailureRemovesOnlyItsPartialDestination() {
+    var destination: URL?, removed: [URL] = []
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, url in
+      destination = url; throw NSError(domain: "fixture", code: 1)
+    }, remove: { removed.append($0) }, state: { $0() }))
+    let request = UUID()
+    var failed = false
+    importer.begin(request: request) { _, outcome in if case .failed = outcome { failed = true } }
+    importer.receiveSelection(request: request) { completion in
+      completion(URL(fileURLWithPath: "/original.mov"), nil); return Progress()
+    }
+    XCTAssertTrue(failed)
+    XCTAssertEqual(removed, [destination!])
+  }
   func testFailedReplacementPreservesPreviousPausedSelection() {
     var valid = true
     let player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {},

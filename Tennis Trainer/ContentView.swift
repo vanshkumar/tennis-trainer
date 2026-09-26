@@ -25,7 +25,8 @@ struct ContentView: View {
     @State private var fps: Double = 0
     
     @State private var currentMode: AppMode = .liveCamera
-    @State private var selectedVideoURL: URL?
+    @StateObject private var videoImporter = VideoImportManager()
+    @State private var importRequest = UUID()
     @State private var showingVideoPicker = false
     
     var body: some View {
@@ -98,15 +99,11 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, _ in updateActiveContexts() }
         .onDisappear {
             cameraManager.setContextActive(false)
-            videoPlayerManager.setContextActive(false)
-        }
-        .onChange(of: selectedVideoURL) { _, newURL in
-            if let url = newURL {
-                videoPlayerManager.loadVideo(from: url)
-            }
+            videoImporter.cancel()
+            videoPlayerManager.shutdown()
         }
         .sheet(isPresented: $showingVideoPicker) {
-            VideoPickerView(selectedVideoURL: $selectedVideoURL)
+            VideoPickerView(request: importRequest, importer: videoImporter)
         }
     }
     
@@ -239,16 +236,7 @@ struct ContentView: View {
     
     private var videoPlaybackView: some View {
         ZStack {
-            if videoPlayerManager.isLoading {
-                // Loading state
-                VStack {
-                    ProgressView("Loading video...")
-                        .font(.title2)
-                        .padding()
-                    Spacer()
-                }
-            } else if videoPlayerManager.duration > 0 {
-                
+            if videoPlayerManager.duration > 0 {
                 // Video player with controls
                 VStack(spacing: 0) {
                     // Video display area with joint overlays
@@ -350,15 +338,14 @@ struct ContentView: View {
                                 }
                             }
                             .accessibilityIdentifier("playback.action")
+                            .disabled(videoPlayerManager.isLoading)
                             .padding()
                             .background(videoPlayerManager.playRequested ? Color.orange : Color.green)
                             .foregroundColor(.white)
                             .clipShape(Circle())
                             
-                            Button("Choose New Video") {
-                                videoPlayerManager.pause()
-                                showingVideoPicker = true
-                            }
+                            Button("Choose New Video") { chooseVideo() }
+                            .accessibilityIdentifier("playback.choose")
                             .padding(.horizontal, 16)
                             .padding(.vertical, 12)
                             .background(Color.blue)
@@ -381,9 +368,8 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                         .padding()
                     
-                    Button("Choose Video from Library") {
-                        showingVideoPicker = true
-                    }
+                    Button("Choose Video from Library") { chooseVideo() }
+                    .accessibilityIdentifier("playback.choose")
                     .padding()
                     .background(Color.blue)
                     .foregroundColor(.white)
@@ -393,8 +379,31 @@ struct ContentView: View {
                 }
             }
         }
+        .safeAreaInset(edge: .bottom) {
+            VStack {
+                if videoPlayerManager.isLoading {
+                    ProgressView("Loading video…").accessibilityIdentifier("playback.loading")
+                    Button("Cancel") {
+                        videoImporter.cancel()
+                        videoPlayerManager.cancelReplacement()
+                    }.accessibilityIdentifier("playback.cancelImport")
+                }
+                if let message = videoPlayerManager.importMessage {
+                    Text(message).accessibilityIdentifier("playback.importMessage")
+                }
+            }.padding()
+        }
     }
     
+    private func chooseVideo() {
+        let request = videoPlayerManager.beginReplacement()
+        importRequest = request
+        videoImporter.begin(request: request) { request, outcome in
+            videoPlayerManager.acceptImport(outcome, request: request)
+        }
+        showingVideoPicker = true
+    }
+
     private func handleModeChange(to newMode: AppMode) {
         // Always retire the outgoing owner, including pending or already paused work.
         updateActiveContexts()
@@ -415,6 +424,7 @@ struct ContentView: View {
     }
 
     private func updateActiveContexts() {
+        if scenePhase != .active || currentMode != .videoPlayback { videoImporter.cancel() }
         cameraManager.setContextActive(scenePhase == .active && currentMode == .liveCamera)
         videoPlayerManager.setContextActive(scenePhase == .active && currentMode == .videoPlayback)
     }

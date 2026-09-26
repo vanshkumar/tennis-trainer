@@ -2,7 +2,8 @@ import SwiftUI
 import PhotosUI
 
 struct VideoPickerView: UIViewControllerRepresentable {
-    @Binding var selectedVideoURL: URL?
+    let request: UUID
+    let importer: VideoImportManager
     @Environment(\.dismiss) private var dismiss
     
     func makeUIViewController(context: Context) -> PHPickerViewController {
@@ -29,41 +30,14 @@ struct VideoPickerView: UIViewControllerRepresentable {
         }
         
         func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-            picker.dismiss(animated: true)
-            
-            guard let result = results.first else {
-                parent.dismiss()
-                return
-            }
-            
-            result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie") { url, error in
-                if let error = error {
-                    print("Error loading video: \(error)")
-                    return
-                }
-                
-                guard let url = url else {
-                    print("No video URL")
-                    return
-                }
-                
-                // Copy to temp directory since the original will be cleaned up
-                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(url.lastPathComponent)
-                
-                do {
-                    if FileManager.default.fileExists(atPath: tempURL.path) {
-                        try FileManager.default.removeItem(at: tempURL)
-                    }
-                    try FileManager.default.copyItem(at: url, to: tempURL)
-                    
-                    DispatchQueue.main.async {
-                        self.parent.selectedVideoURL = tempURL
-                        self.parent.dismiss()
-                    }
-                } catch {
-                    print("Error copying video: \(error)")
+            let provider: VideoImportManager.Provider? = results.first.map { result in
+                { completion in
+                    result.itemProvider.loadFileRepresentation(forTypeIdentifier: "public.movie", completionHandler: completion)
                 }
             }
+            parent.importer.receiveSelection(request: parent.request, provider: provider)
+            // Normal selection dismissal does not cancel its provider operation.
+            parent.dismiss()
         }
     }
 }
