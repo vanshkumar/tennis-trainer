@@ -97,3 +97,167 @@ association belongs to 01-02. Sampling sufficiency, accepted-gap bounds, accurac
 overlay error and physical sound latency remain unmeasured. Freeze final criteria
 with version/date and rationale before Phase 4 scoring; never tune on confirmation
 results without declaring a new protocol version and a fresh confirmation set.
+
+## Phase 01 execution evidence — 2026-09-25
+
+The source/settings and protocol above remain the before-change reference. This
+entry adds deterministic results; it does not freeze new empirical acceptance
+bounds or claim a measured clip/audio baseline.
+
+Test host: Xcode 27.0, arm64 iPhone 17 Pro simulator, iOS 26.5 build 23F77.
+The deployment target remains iOS 18.5. Implementation starts from `e3c845d`;
+decoder commits are `6267b54` and `6a182bf`, and ownership RED is `b496c04`.
+The final scoped autorelease-pool fix and tests are committed with this entry.
+For precise tested contents, SHA-256 over each UTF-8 path + NUL + file bytes,
+in the following order, is
+`b79d6c791a11dae2185bbca847ce760f0078479b08e840711b7c333fca43ab73`:
+`Tennis Trainer/AnalysisFrame.swift`,
+`Tennis Trainer/Detectors/GridTrackNetDetector.swift`,
+`Tennis Trainer/Detectors/GridTrackNetDecoder.swift`,
+`Tennis TrainerTests/GridTrackNetDecoderTests.swift`,
+`Tennis TrainerTests/AnalysisAssociationTests.swift`,
+`Tennis TrainerTests/BallDetectionManagerTests.swift`.
+All three model file checksums above were rechecked and are unchanged.
+
+Commands (logs and result bundles remain local under `/private/tmp`):
+
+```sh
+xcodebuild test -scheme 'Tennis Trainer' -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' '-only-testing:Tennis TrainerTests/GridTrackNetDecoderTests' -resultBundlePath /private/tmp/tennis-01-03-task1-final.xcresult
+xcodebuild test -scheme 'Tennis Trainer' -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' '-only-testing:Tennis TrainerTests' -resultBundlePath /private/tmp/tennis-01-03-final-regression.xcresult
+xcrun xcresulttool get test-results summary --path /private/tmp/tennis-01-03-final-regression.xcresult --format json
+xcrun xcresulttool get test-results tests --path /private/tmp/tennis-01-03-final-regression.xcresult --compact
+```
+
+| Run | Executed | Pass | Fail | Skip | Bundle basename |
+|---|---:|---:|---:|---:|---|
+| Decoder intentional RED | 2 | 0 | 2 | 0 | `tennis-01-03-task1-red` |
+| First decoder/model run | 4 | 3 | 1 | 0 | `tennis-01-03-task1-green` |
+| Decoder/model corrected contract | 5 | 5 | 0 | 0 | `tennis-01-03-task1-final` |
+| Adapter/ownership RED | 4 | 3 | 1 | 0 | `tennis-01-03-task2-characterization` |
+| Initial full regression | 64 | 64 | 0 | 0 | `tennis-01-03-full-regression` |
+| Final full regression | 65 | 65 | 0 | 0 | `tennis-01-03-final-regression` |
+
+Final class counts: BallDetectionManagerTests 21, AnalysisAssociationTests 10,
+GridTrackNetDecoderTests 6, PoseDetectionManagerTests 4,
+ServeTossApexDetectorTests 23, existing Swift Testing scaffold 1. The scaffold
+does not substitute for any required test. The controlled semaphore stalls emit
+one Thread Performance Checker priority warning in the manager tests; there are
+no failed or skipped tests. This is not a production timing measurement.
+
+### Actual bundled model and decoder contract
+
+The separate real-model smoke **passed**, loading the bundle and predicting from
+five owned uniform frames. Inputs are `f1`…`f5`, 768×432 images. Every output
+(`conf`, `x_off`, `y_off`) returned FP16 (raw dtype 65552), shape
+`[1, 5, 48, 27]`, and strides `[7680, 1536, 32, 1]`. The first smoke failed only
+because its assertion expected the older three-axis reference shape; the allowed
+leading singleton form was already supported by the implementation. No asset or
+numeric threshold changed. Uniform-frame output establishes interface/runtime
+compatibility, not tennis-ball detection quality.
+
+The pure decoder validates each head's dtype, exact semantic dimensions, positive
+nonoverlapping strides, checked offset arithmetic and scoped accessible byte span.
+It accepts `[5,48,27]` / `[5,27,48]` and their leading singleton forms; each head
+may use its own valid layout. It rejects unsupported types, malformed ranks or
+dimensions, disagreement, zero/negative/overflowing/overlapping/out-of-storage
+strides, and any nonfinite tensor value. Valid confidence below 0.5 keeps real
+metadata with a missing position. Row-then-column first argmax tie behavior,
+threshold equality, all five times, padding/out-of-source rejection, bottom-left
+conversion and portrait-fit/nonportrait-fill geometry have strict fixtures.
+Nonuniform pixel quadrants verify actual `.up`, `.right`, `.left`, `.down`
+preparation; these tests do not establish displayed overlay alignment.
+
+### Final ownership ledger
+
+Scope: app pipeline buffers retained for admitted work. A caller's rejected
+offer is not adopted or queued. Capture/player source pools and framework-private
+Core Image/Core ML allocations are outside this object ledger; process-memory
+and sustained-device measurements remain pending.
+
+| Owner/state | One manager | Two retained managers |
+|---|---:|---:|
+| Active lease / worker, including held publication | 1 | 2 |
+| Pending input | 0 | 0 |
+| Prepared ring | 5 | 10 |
+| Immutable prediction snapshot | shares the same 5 | shares the same 10 |
+| Admitted raw input | 1 | 2 |
+| Oriented intermediate during preparation | 1 | 2 |
+| New prepared buffer before ring insertion/eviction | 1 | 2 |
+| **Peak distinct app-visible buffers** | **8** | **16** |
+| Distinct buffers during prediction | 6 | 12 |
+| Distinct buffers while publication is held | 5 | 10 |
+| Publication payload | 1, values only | 2, values only |
+| Pixel buffers / tensors owned by publication | 0 / 0 | 0 / 0 |
+| Retained cue entries | 3 | 6 |
+| Production trace history | 0 | 0 |
+
+Five model feature values reference the same prepared pixels; the snapshot adds
+no unique buffers. Scoped preparation drains temporary Core Image owners before
+prediction; scoped prediction drains model input/output temporaries before
+returning detached samples. The decoder holds three fixed 6,480-element Float
+arrays transiently (77,760 scalar bytes), never in publication. No optional
+production trace was added; diagnostics retain scalar counters only.
+
+The ownership fixture observes distinct CVPixelBuffer identities through weak
+references, plus `CVPixelBufferCreateWithBytes` destruction callbacks for raw
+storage. Two simultaneous preparation stalls reach exactly 8 each / 16 total;
+prediction stalls reach exactly 6 each / 12 total. One thousand additional
+offers per manager at preparation, prediction, and publication stalls are
+rejected without growing pending input, workers, publication or retained pixels.
+Reset during prediction clears prepared storage on worker completion; reset at
+publication invalidates effects immediately and leaves at most the five idle
+ring pixels until next worker reset or teardown. Raw release callbacks all fire;
+owner teardown releases remaining ring pixels. The initial prediction observation
+was 14 total because two oriented images survived through autoreleases. The
+scoped pool fix makes the original 12/16 assertions pass; the cap was not loosened.
+
+Terminal cases exercise real preparation/decoder/cue and injected boundaries for
+warmup, missing model, missing/failed pose, orientation/resize allocation failure,
+prediction error, malformed tensors, pre-worker invalidation, reset inside
+prediction, publication discard and teardown before worker/publication. Lease
+release counts match every accepted job exactly once. Separate tests prove old
+duplicate completions cannot free a new lease and publication retains no tensors.
+
+### Callback/requirement evidence and handoff
+
+Both real source adapters (`submitSampleBuffer` and the returned-time playback
+output reader) feed nine acquired frames through real orientation/resize, owned
+windows, synthetic raw tensors, strict decoding, associated pose and apex logic.
+Each emits **one** forwarded callback for candidate sequence 3. All five identities,
+source times, orientations, mappings and pose identities/baselines are asserted
+in every window. The fixtures admit rational source times 10033…10297/1000,
+with 33/1000-second gaps; these are controlled inputs, not measured live cadence.
+An equivalent rational-time replay is rejected. Broader suites cover replay
+after history eviction, overlaps, contradictory/mismatched pose, missing and
+low-confidence candidates, invalid times, source/generation mismatch, checked
+counter exhaustion, 1.5-second horizon and exact 3,999/4,000/4,001ms cooldown.
+
+| Requirement | Deterministic evidence |
+|---|---|
+| CUE-01 | Real adapters + original five-record window + FP16/geometry fixtures |
+| CUE-02 | Held preparation/prediction/publication, distinct-buffer/deallocation and lease tests |
+| CUE-03 | One complete-path callback, rational replay/overlap/pruning and exact cooldown tests |
+| CUE-04 | Candidate-own pose, contradictory later pose, all identity mismatches and strict fallback |
+
+ContentView's two automatic `onApex` closures still call `AudioManager.playBeep`;
+the manual Test Beep button remains separate. No physical audio ran in tests.
+The first **consumed** estimate for each identity remains authoritative, including
+missing and low-confidence estimates; later overlapping estimates cannot revise it.
+
+A1 (real-toss sampling sufficiency) remains empirically unverified. A2 (eight
+app-visible buffers) is proven for this implementation/test scope, with private
+framework/process memory explicitly excluded. A3 (compact cue history) has the
+preserved algorithm and adversarial deterministic characterization; representative
+clip outcomes remain unscored. EDGE-CUE-01 and EDGE-CUE-04 remain the supplied
+edge report's **unclassified/unresolved** items despite manual contract coverage.
+The descriptor-less transparency prohibition remains flagged-unverified: synthetic
+cue counts, bounded queues, and callback times must not be presented as measured
+real-toss accuracy or physical sound latency.
+
+Repository media inventory again contains no `.mov`, `.mp4`, or `.m4v` fixture;
+external permission, physical iPhone and audio timing setup remain unestablished.
+No baseline comparison was possible, and no criteria were retroactively tuned.
+Phase 2 owns complete control transitions; Phase 3 owns displayed alignment;
+Phase 4 owns permitted/labeled corpus acquisition, frozen numeric empirical
+criteria, sustained device/memory testing and physical audio timing. Those missing
+checks remain required evidence, not passes.

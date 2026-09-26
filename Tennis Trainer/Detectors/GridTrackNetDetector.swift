@@ -115,11 +115,13 @@ final class GridTrackNetDetector {
   func predict(window: AnalysisFrame.Window) -> [Sample]? {
     predictionLock.lock()
     defer { predictionLock.unlock() }
-    do {
-      return decode(try predictor(window), window: window)
-    } catch {
-      print("GridTrackNetDetector: prediction error: \(error)")
-      return nil
+    return autoreleasepool {
+      do {
+        return decode(try predictor(window), window: window)
+      } catch {
+        print("GridTrackNetDetector: prediction error: \(error)")
+        return nil
+      }
     }
   }
 

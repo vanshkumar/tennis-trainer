@@ -8,6 +8,16 @@
 
 ## Task Notes
 
+**2026-09-25 — Preparation buffer lifetimes**
+- Observation: Two concurrent GridTrackNet preparations reached 16 distinct buffers as expected, but Core Image autoreleases kept two oriented intermediates alive into prediction (14 instead of 12). A scoped preparation autorelease pool released them before prediction without changing pixels or the eight-buffer cap.
+- Action: Keep preparation and prediction temporary owners in scoped autorelease pools; verify weak buffer identities and raw-buffer destruction while worker and publication stages are held, rather than counting array entries alone.
+- Confidence: high
+
+**2026-09-25 — Bundled GridTrackNet output representation**
+- Observation: The packaged model runs on the iOS 26.5 simulator and returns all three FP16 heads as `[1, 5, 48, 27]` with strides `[7680, 1536, 32, 1]`; the older reference omitted the singleton batch and spatial padding.
+- Action: Accept only the explicit semantic five-frame/48×27 layouts and validate each head inside scoped byte access. Keep the bundled smoke separate from independently padded synthetic fixtures and from clip-accuracy claims.
+- Confidence: high
+
 **2026-09-25 — Rational cue boundary fixtures**
 - Observation: Constructing the intended 4.1-second test timestamp with `CMTime(seconds:preferredTimescale:)` produced a value below the intended exact cooldown boundary; a seconds-based fixture obscured the distinction between a real rejection and rounding in test setup.
 - Action: Build exact cooldown, equality, and horizon fixtures with integer `CMTime(value:timescale:)` values. Assert consumed/evaluated counts separately from cue counts.

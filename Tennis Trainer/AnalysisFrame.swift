@@ -116,24 +116,26 @@ struct AnalysisFrame {
                       pose: PoseDetectionManager.FramePose,
                       ingressTime: CFTimeInterval? = nil,
                       preparation: Preparation = .init()) -> AnalysisFrame? {
-    guard input.sourceID == identity.sourceID,
-          let oriented = preparation.orient(input.pixelBuffer, input.orientation) else { return nil }
-    let rawSize = CGSize(width: CVPixelBufferGetWidth(input.pixelBuffer),
-                         height: CVPixelBufferGetHeight(input.pixelBuffer))
-    let w = CGFloat(CVPixelBufferGetWidth(oriented))
-    let h = CGFloat(CVPixelBufferGetHeight(oriented))
-    let portrait = h > w
-    let scale = portrait ? min(768 / w, 432 / h) : max(768 / w, 432 / h)
-    let mapping = Mapping(sourceWidth: Float(w), sourceHeight: Float(h), scale: Float(scale),
-      offsetX: Float((768 - w * scale) / 2), offsetY: Float((432 - h * scale) / 2))
-    let metadata = Metadata(identity: identity, sourceTime: input.sourceTime,
-      ingressTime: ingressTime ?? input.ingressTime,
-      rawSize: rawSize, orientedSize: CGSize(width: w, height: h), orientation: input.orientation,
-      mapping: mapping, pose: pose)
-    guard metadata.isValid else { return nil }
-    // The scaler allocates even at unit scale: .up/exact-size input must not alias capture memory.
-    let prepared = preparation.resize(oriented, portrait)
-    guard let prepared else { return nil }
-    return AnalysisFrame(pixels: prepared, metadata: metadata)
+    return autoreleasepool {
+      guard input.sourceID == identity.sourceID,
+            let oriented = preparation.orient(input.pixelBuffer, input.orientation) else { return nil }
+      let rawSize = CGSize(width: CVPixelBufferGetWidth(input.pixelBuffer),
+                           height: CVPixelBufferGetHeight(input.pixelBuffer))
+      let w = CGFloat(CVPixelBufferGetWidth(oriented))
+      let h = CGFloat(CVPixelBufferGetHeight(oriented))
+      let portrait = h > w
+      let scale = portrait ? min(768 / w, 432 / h) : max(768 / w, 432 / h)
+      let mapping = Mapping(sourceWidth: Float(w), sourceHeight: Float(h), scale: Float(scale),
+        offsetX: Float((768 - w * scale) / 2), offsetY: Float((432 - h * scale) / 2))
+      let metadata = Metadata(identity: identity, sourceTime: input.sourceTime,
+        ingressTime: ingressTime ?? input.ingressTime,
+        rawSize: rawSize, orientedSize: CGSize(width: w, height: h), orientation: input.orientation,
+        mapping: mapping, pose: pose)
+      guard metadata.isValid else { return nil }
+      // The scaler allocates even at unit scale: .up/exact-size input must not alias capture memory.
+      let prepared = preparation.resize(oriented, portrait)
+      guard let prepared else { return nil }
+      return AnalysisFrame(pixels: prepared, metadata: metadata)
+    }
   }
 }
