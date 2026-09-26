@@ -147,24 +147,25 @@ struct ContentView: View {
                             .rightShoulder, .rightElbow, .rightWrist
                         ]
                         
-                        ZStack {
-                          ForEach(rightArmJoints, id: \.self) { jointName in
-                            if let point = cameraPoseManager.detectedPose[jointName] {
+                        if rightArmJoints.contains(where: { cameraPoseManager.detectedPose[$0] != nil }) {
+                          ZStack {
+                            ForEach(rightArmJoints, id: \.self) { jointName in
+                              if let point = cameraPoseManager.detectedPose[jointName] {
                                 Circle()
-                                    .fill(jointColor(for: jointName))
-                                    .frame(width: 6, height: 6)
-                                    .position(
-                                        x: point.location.x * geometry.size.width,
-                                        y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
-                                    )
+                                  .fill(jointColor(for: jointName))
+                                  .frame(width: 6, height: 6)
+                                  .position(
+                                    x: point.location.x * geometry.size.width,
+                                    y: (1 - point.location.y) * geometry.size.height
+                                  )
+                              }
                             }
                           }
+                          .accessibilityElement(children: .ignore)
+                          .accessibilityLabel("Right arm tracking")
+                          .accessibilityValue("\(rightArmJoints.filter { cameraPoseManager.detectedPose[$0] != nil }.count) joints")
+                          .accessibilityIdentifier("practice.poseOverlay")
                         }
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Right arm tracking")
-                        .accessibilityValue("\(rightArmJoints.filter { cameraPoseManager.detectedPose[$0] != nil }.count) joints")
-                        .accessibilityIdentifier("practice.poseOverlay")
-                        .accessibilityHidden(!rightArmJoints.contains { cameraPoseManager.detectedPose[$0] != nil })
 
                         // Ball overlay (live camera)
                         if let manager = cameraManager.ballDetectionManager {
@@ -285,24 +286,25 @@ struct ContentView: View {
                                 .rightShoulder, .rightElbow, .rightWrist
                             ]
                             
-                            ZStack {
-                              ForEach(rightArmJoints, id: \.self) { jointName in
-                                if let point = playbackPoseManager.detectedPose[jointName] {
+                            if rightArmJoints.contains(where: { playbackPoseManager.detectedPose[$0] != nil }) {
+                              ZStack {
+                                ForEach(rightArmJoints, id: \.self) { jointName in
+                                  if let point = playbackPoseManager.detectedPose[jointName] {
                                     Circle()
-                                        .fill(jointColor(for: jointName))
-                                        .frame(width: 6, height: 6)
-                                        .position(
-                                            x: point.location.x * geometry.size.width,
-                                            y: (1 - point.location.y) * geometry.size.height
-                                        )
+                                      .fill(jointColor(for: jointName))
+                                      .frame(width: 6, height: 6)
+                                      .position(
+                                        x: point.location.x * geometry.size.width,
+                                        y: (1 - point.location.y) * geometry.size.height
+                                      )
+                                  }
                                 }
                               }
+                              .accessibilityElement(children: .ignore)
+                              .accessibilityLabel("Right arm tracking")
+                              .accessibilityValue("\(rightArmJoints.filter { playbackPoseManager.detectedPose[$0] != nil }.count) joints")
+                              .accessibilityIdentifier("practice.poseOverlay")
                             }
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel("Right arm tracking")
-                            .accessibilityValue("\(rightArmJoints.filter { playbackPoseManager.detectedPose[$0] != nil }.count) joints")
-                            .accessibilityIdentifier("practice.poseOverlay")
-                            .accessibilityHidden(!rightArmJoints.contains { playbackPoseManager.detectedPose[$0] != nil })
 
                             // Ball overlay (video)
                             if let manager = videoPlayerManager.ballDetectionManager {
