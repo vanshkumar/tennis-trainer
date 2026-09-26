@@ -5,7 +5,7 @@
 Make the existing toss-apex cue dependable in both live-camera practice and saved-video review. First establish consistent feedback from correctly associated frames and pose data, then make session controls trustworthy, align visible tracking with the displayed image, and verify the combined behavior with repeatable clips and real-device evidence. Each phase delivers an observable outcome in the existing app and includes its own regression checks.
 
 **Milestone:** Toss-apex reliability
-**Status:** Phase 1 planned 2026-09-25; ready to execute
+**Status:** Phase 1 implementation and automated checks complete 2026-09-25; human verification pending
 **Structure:** Coarse, vertical MVP phases; preserve portrait, right-handed solo practice and on-device processing.
 
 ## Phases
@@ -19,7 +19,7 @@ Make the existing toss-apex cue dependable in both live-camera practice and save
 
 ### Phase 1: Consistent Toss Cues
 
-**Goal:** A player receives consistent toss feedback tied to the frames and body pose being analyzed in either mode.
+**Goal:** As a player, I want to receive consistent toss feedback tied to the frames and body pose being analyzed in either mode, so that I can trust feedback for my current toss.
 **Mode:** mvp
 **Depends on:** Nothing (first phase)
 **Requirements:** CUE-01, CUE-02, CUE-03, CUE-04
@@ -137,7 +137,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Consistent Toss Cues | 3/3 | In Progress|  |
+| 1. Consistent Toss Cues | 3/3 | In Progress | - |
 | 2. Dependable Practice Controls | 0/TBD | Not started | - |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |

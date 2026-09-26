@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-25 — Phase 1 verification handoff**
+- Observation: GSD rejected this roadmap's Phase 1 MVP goal until the existing goal was expressed as an "As a / I want to / so that" user story. After that correction, all deterministic checks passed, but the planned claims review and two unclassified edge items still required human resolution.
+- Action: Validate MVP goal syntax before future phase execution, and preserve explicit human-review items in UAT even when implementation tests pass; do not mark an undefined edge probe as verified.
+- Confidence: high
+
 **2026-09-25 — Preparation buffer lifetimes**
 - Observation: Two concurrent GridTrackNet preparations reached 16 distinct buffers as expected, but Core Image autoreleases kept two oriented intermediates alive into prediction (14 instead of 12). A scoped preparation autorelease pool released them before prediction without changing pixels or the eight-buffer cap.
 - Action: Keep preparation and prediction temporary owners in scoped autorelease pools; verify weak buffer identities and raw-buffer destruction while worker and publication stages are held, rather than counting array entries alone.
