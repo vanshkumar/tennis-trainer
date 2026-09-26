@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Phase 1 UAT coverage precheck**
+- Observation: The verify-work API gate parsed `01-COVERAGE.md`, which contains requirements coverage, as an API matrix and rejected it as empty. The phase only changes the existing on-device pipeline.
+- Action: Keep the supported `No external API integration: <reason>` declaration in this phase's coverage document; preserve the requirements tables and enabled gate rather than inventing API rows.
+- Confidence: high
+
 **2026-09-25 — Phase 1 verification handoff**
 - Observation: GSD rejected this roadmap's Phase 1 MVP goal until the existing goal was expressed as an "As a / I want to / so that" user story. After that correction, all deterministic checks passed, but the planned claims review and two unclassified edge items still required human resolution.
 - Action: Validate MVP goal syntax before future phase execution, and preserve explicit human-review items in UAT even when implementation tests pass; do not mark an undefined edge probe as verified.

@@ -1,5 +1,7 @@
 # Phase 1 source coverage
 
+No external API integration: Phase 1 refines the existing on-device AVFoundation, Vision and bundled Core ML pipeline; it adds no external service or SDK integration.
+
 All in-scope source items are planned. No CONTEXT.md, SPEC.md or UI-SPEC.md exists; no discussion decision was fabricated. The approved roadmap and requirements govern scope. Research prescriptions and probe resolutions are technical planning choices, not newly approved product preferences.
 
 | Source | ID / item | Plan / task | Status |

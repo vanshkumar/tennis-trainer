@@ -44,7 +44,7 @@ covered_files:
   - docs/references/README.md
   - docs/references/toss-cue-validation.md
 
-covered_digest: "v1:sha256:24c8f95e176f750b858aecfe2bcd5e2018159bdd38cca07e13e90647efe4674a"
+covered_digest: "v1:sha256:08d548c54c75e3664d713d133e29f92801c2091ca8596ea048e2806ea3988a8c"
 decision_coverage:
   honored: 0
   total: 0
@@ -280,3 +280,5 @@ Fingerprint fields above are copied from `gsd_run query verification.fingerprint
 ---
 
 _Verifier: gsd-verifier_
+
+UAT resume note — 2026-09-26: The API-coverage precheck initially misread the source-coverage document as an empty API matrix. Added the supported, reasoned no-external-integration declaration to `01-COVERAGE.md`; the gate then passed. No app, test, requirement or human-review outcome changed. The covered-input fingerprint was refreshed for that clarification and its learning entry; all three human items remain pending.
