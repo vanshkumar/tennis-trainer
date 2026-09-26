@@ -18,31 +18,60 @@ final class Tennis_TrainerUITests: XCTestCase {
             let choose = app.buttons["playback.choose"]
             XCTAssertTrue(choose.waitForExistence(timeout: 5))
             choose.tap(); app.buttons["import.cancel"].tap()
-            assertLabel(app.staticTexts["playback.importMessage"], "Video selection cancelled. Choose another video.")
+            assertLabel(app.staticTexts["playback.importMessage"], scenario == "playback-import"
+              ? "Video selection cancelled. Your previous video is ready to play."
+              : "Video selection cancelled. Choose another video.")
             XCTAssertTrue(choose.isEnabled)
             XCTAssertEqual(app.buttons["playback.action"].exists, scenario == "playback-import")
             choose.tap(); app.buttons["import.failure"].tap()
             XCTAssertTrue(app.buttons["playback.cancelImport"].waitForExistence(timeout: 3))
-            assertLabel(app.staticTexts["playback.importMessage"], "Video could not be imported. Choose another video.")
+            if scenario == "playback-import" { XCTAssertFalse(app.sliders["playback.slider"].isEnabled) }
+            assertLabel(app.staticTexts["playback.importMessage"], scenario == "playback-import"
+              ? "Video could not be imported. Your previous video is ready to play."
+              : "Video could not be imported. Choose another video.")
             if scenario == "playback-import" {
                 XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
                 XCTAssertTrue(app.buttons["playback.action"].isEnabled)
+                XCTAssertTrue(app.sliders["playback.slider"].isEnabled)
             }
             choose.tap(); app.buttons["import.success"].tap()
             XCTAssertTrue(app.buttons["playback.cancelImport"].waitForExistence(timeout: 3))
             assertLabel(app.staticTexts["playback.status"], "Paused")
             let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["playback.action"])
             wait(for: [enabled], timeout: 5)
+            XCTAssertTrue(app.sliders["playback.slider"].isEnabled)
             app.buttons["playback.action"].tap()
             assertLabel(app.staticTexts["playback.status"], "Playing")
             choose.tap(); app.buttons["import.success"].tap()
             let cancel = app.buttons["playback.cancelImport"]
             XCTAssertTrue(cancel.waitForExistence(timeout: 3)); cancel.tap()
-            assertLabel(app.staticTexts["playback.importMessage"], "Video selection cancelled. Choose another video.")
+            assertLabel(app.staticTexts["playback.importMessage"], "Video selection cancelled. Your previous video is ready to play.")
             XCTAssertTrue(app.buttons["playback.action"].isEnabled)
+            XCTAssertTrue(app.sliders["playback.slider"].isEnabled)
             XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
             app.terminate()
         }
+    }
+
+    @MainActor
+    func testShortClipSliderUsesActualDurationAndAccessibleTime() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-short"]
+        app.launch()
+        app.buttons["Video Playback"].tap()
+        let slider = app.sliders["playback.slider"]
+        XCTAssertTrue(slider.waitForExistence(timeout: 5))
+        XCTAssertEqual(slider.label, "Playback position")
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+        assertLabel(app.staticTexts["playback.status"], "Paused")
+        let value = try XCTUnwrap(slider.value as? String)
+        XCTAssertTrue(value.hasSuffix("of 0.5 seconds"))
+        let elapsed = try XCTUnwrap(Double(value.split(separator: " ")[0]))
+        XCTAssertGreaterThan(elapsed, 0.1)
+        XCTAssertLessThan(elapsed, 0.4)
+        slider.adjust(toNormalizedSliderPosition: 1)
+        assertLabel(app.staticTexts["playback.status"], "Paused")
+        XCTAssertEqual(slider.value as? String, "0.5 seconds of 0.5 seconds")
     }
 
     @MainActor

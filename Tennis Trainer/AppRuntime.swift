@@ -14,7 +14,7 @@ enum AppRuntime {
       let name = arguments[index + 1]
       return ["permission-undetermined", "permission-denied-return", "permission-restricted",
               "capture-startup", "capture-recovery", "capture-failure", "playback-seek", "playback-end",
-              "playback-import", "playback-import-empty", "playback-overlay"]
+              "playback-import", "playback-import-empty", "playback-overlay", "playback-short"]
         .contains(name) ? name : nil
       #else
       return nil
@@ -82,7 +82,8 @@ enum AppRuntime {
           }
           return true
         }, pause: {},
-          startLoop: {}, stopLoop: {}, seek: { target, completion in
+          startLoop: {}, stopLoop: {}, load: { _ in scenario == "playback-short" ? 0.5 : 30 },
+          seek: { target, completion in
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
               effects.position = target
               completion(true)

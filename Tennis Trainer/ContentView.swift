@@ -147,20 +147,24 @@ struct ContentView: View {
                             .rightShoulder, .rightElbow, .rightWrist
                         ]
                         
-                        ForEach(rightArmJoints, id: \.self) { jointName in
+                        ZStack {
+                          ForEach(rightArmJoints, id: \.self) { jointName in
                             if let point = cameraPoseManager.detectedPose[jointName] {
                                 Circle()
                                     .fill(jointColor(for: jointName))
                                     .frame(width: 6, height: 6)
-                                    .accessibilityElement()
-                                    .accessibilityLabel("Pose overlay")
-                                    .accessibilityIdentifier("practice.poseOverlay")
                                     .position(
                                         x: point.location.x * geometry.size.width,
                                         y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
                                     )
                             }
+                          }
                         }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Right arm tracking")
+                        .accessibilityValue("\(rightArmJoints.filter { cameraPoseManager.detectedPose[$0] != nil }.count) joints")
+                        .accessibilityIdentifier("practice.poseOverlay")
+                        .accessibilityHidden(!rightArmJoints.contains { cameraPoseManager.detectedPose[$0] != nil })
 
                         // Ball overlay (live camera)
                         if let manager = cameraManager.ballDetectionManager {
@@ -181,7 +185,7 @@ struct ContentView: View {
                             Text("Status: \(cameraManager.captureState.message)")
                                 .accessibilityIdentifier("camera.captureStatus")
                                 .foregroundColor(.white)
-                                .font(.caption)
+                                .font(.callout)
                         }
                         .padding(8)
                         .background(Color.black.opacity(0.6))
@@ -235,7 +239,7 @@ struct ContentView: View {
                 VStack {
                     Text(cameraManager.accessState.message)
                         .accessibilityIdentifier("camera.permissionStatus")
-                        .foregroundColor(.red)
+                        .foregroundColor(cameraManager.accessState == .denied || cameraManager.accessState == .unavailable ? .red : .primary)
                         .font(.title2)
                     if cameraManager.accessState == .restricted {
                         Text("Camera access is controlled by device restrictions. Contact the device owner or administrator.")
@@ -281,20 +285,24 @@ struct ContentView: View {
                                 .rightShoulder, .rightElbow, .rightWrist
                             ]
                             
-                            ForEach(rightArmJoints, id: \.self) { jointName in
+                            ZStack {
+                              ForEach(rightArmJoints, id: \.self) { jointName in
                                 if let point = playbackPoseManager.detectedPose[jointName] {
                                     Circle()
                                         .fill(jointColor(for: jointName))
                                         .frame(width: 6, height: 6)
-                                        .accessibilityElement()
-                                        .accessibilityLabel("Pose overlay")
-                                        .accessibilityIdentifier("practice.poseOverlay")
                                         .position(
                                             x: point.location.x * geometry.size.width,
                                             y: (1 - point.location.y) * geometry.size.height
                                         )
                                 }
+                              }
                             }
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel("Right arm tracking")
+                            .accessibilityValue("\(rightArmJoints.filter { playbackPoseManager.detectedPose[$0] != nil }.count) joints")
+                            .accessibilityIdentifier("practice.poseOverlay")
+                            .accessibilityHidden(!rightArmJoints.contains { playbackPoseManager.detectedPose[$0] != nil })
 
                             // Ball overlay (video)
                             if let manager = videoPlayerManager.ballDetectionManager {
@@ -338,13 +346,16 @@ struct ContentView: View {
                                     .monospaced()
                                 
                                 Slider(value: Binding(
-                                    get: { max(0, videoPlayerManager.currentTime) },
+                                    get: { min(max(0, videoPlayerManager.currentTime), videoPlayerManager.duration) },
                                     set: { newTime in
                                         videoPlayerManager.seek(to: max(0, newTime))
                                     }
-                                ), in: 0...max(videoPlayerManager.duration, 1))
+                                ), in: 0...videoPlayerManager.duration)
                                 .accentColor(.white)
                                 .accessibilityIdentifier("playback.slider")
+                                .accessibilityLabel("Playback position")
+                                .accessibilityValue(Text("\(videoPlayerManager.currentTime, specifier: "%.1f") seconds of \(videoPlayerManager.duration, specifier: "%.1f") seconds"))
+                                .disabled(videoPlayerManager.isLoading)
                                 
                                 Text(formatTime(videoPlayerManager.duration))
                                     .font(.caption)
