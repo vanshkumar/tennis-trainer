@@ -1,7 +1,7 @@
 ---
 phase: 02-dependable-practice-controls
 plan: "02"
-status: awaiting-human-verification
+status: continuation-authorized
 completed_tasks: 1
 total_tasks: 2
 resume_task: 2
@@ -9,6 +9,10 @@ updated: 2026-09-26
 ---
 
 # Camera permission tracer checkpoint
+
+## User disposition — 2026-09-26
+
+The user answered **Yes** to continuing Phase 2 implementation while deferring the remaining physical-device checks to the end of the phase. Resume Task 2, then execute plans 02-03 and 02-04. This explicitly changes checkpoint timing only: hardware results, six unresolved edge dispositions and the evidence-limit review remain pending. Do not change global auto-advance preferences or record a human test pass.
 
 Task 1 is committed and its automated checks pass. Task 2 has not started. This is a resumable tracer checkpoint, not a completion SUMMARY; do not advance the plan or dispatch 02-03 until 02-02 is completed. The orchestrator confirmed the checkpoint treatment after inspecting the canonical tracer rule.
 
