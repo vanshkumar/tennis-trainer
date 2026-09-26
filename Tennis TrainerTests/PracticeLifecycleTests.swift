@@ -4,18 +4,194 @@ import AVFoundation
 
 final class PracticeLifecycleTests: XCTestCase {
   func testPauseInvalidatesHeldPlaybackPublication() throws {
-    let pipeline = LifecyclePipeline()
-    let player = VideoPlayerManager()
-    player.setupBallDetection(with: pipeline.pose, factory: { _ in pipeline.manager })
-    var frames = 0
-    player.onFrameProcessed = { frames += 1 }
-    let output = try LifecycleOutput()
-    player.processCurrentFrame(output: output, requestedTime: .zero, orientation: .up)
-    pipeline.worker.drain()
-    player.pause()
-    pipeline.publication.drain()
-    XCTAssertEqual(frames, 0, "Pause must invalidate held frame effects")
-    XCTAssertTrue(pipeline.pose.detectedPose.isEmpty, "Pause must invalidate held pose effects")
+    try assertPlaybackExit(holdPublication: true, contextExit: false)
+  }
+
+  func testPauseInvalidatesHeldPlaybackWorker() throws {
+    try assertPlaybackExit(holdPublication: false, contextExit: false)
+  }
+
+  func testPlaybackContextExitInvalidatesBothHeldStages() throws {
+    for held in [false, true] { try assertPlaybackExit(holdPublication: held, contextExit: true) }
+  }
+
+  private func assertPlaybackExit(holdPublication: Bool, contextExit: Bool) throws {
+    let fixture = try PlaybackFixture()
+    fixture.play()
+    try fixture.feed(1...4)
+    fixture.offer(5)
+    if holdPublication { fixture.pipeline.worker.drain() }
+    let generation = fixture.pipeline.manager.admissionGeneration
+    let released = fixture.pipeline.manager.diagnostics.released
+    fixture.onPause = {
+      XCTAssertNotEqual(fixture.pipeline.manager.admissionGeneration, generation,
+        "Invalidation must precede physical pause")
+    }
+    if contextExit { fixture.player.setContextActive(false) } else { fixture.player.pause() }
+    fixture.onPause = nil
+    fixture.pipeline.flush()
+    XCTAssertFalse(fixture.player.isPlaying)
+    XCTAssertNil(fixture.pipeline.manager.ballPosition)
+    XCTAssertTrue(fixture.pipeline.pose.detectedPose.isEmpty)
+    XCTAssertEqual(fixture.frames, 4)
+    XCTAssertEqual(fixture.tracks, 0)
+    XCTAssertEqual(fixture.cues, 0)
+    XCTAssertEqual(fixture.pipeline.manager.diagnostics.released, released + 1)
+    fixture.player.setContextActive(true)
+    XCTAssertFalse(fixture.player.isPlaying, "Context return cannot override Pause")
+    fixture.play()
+    try fixture.feed(1...4)
+    XCTAssertEqual(fixture.pipeline.manager.diagnostics.preparedRingCount, 4)
+    XCTAssertEqual(fixture.cues, 0)
+    try fixture.feed(5...9)
+    XCTAssertEqual(fixture.cues, 1)
+    XCTAssertEqual(fixture.pipeline.windows.last?.last?.sourceTime, CMTime(value: 10297, timescale: 1000))
+  }
+
+  func testAcquiredPlaybackFrameCannotCrossPauseAndResume() throws {
+    let fixture = try PlaybackFixture()
+    fixture.play()
+    fixture.output.beforeReturn = {
+      fixture.player.pause()
+      fixture.play()
+    }
+    fixture.offer(99)
+    fixture.pipeline.flush()
+    fixture.output.beforeReturn = nil
+    XCTAssertEqual(fixture.frames, 0)
+    XCTAssertEqual(fixture.pipeline.manager.diagnostics.admitted, 0)
+    try fixture.feed(1...9)
+    XCTAssertEqual(fixture.cues, 1)
+    XCTAssertEqual(fixture.pipeline.windows.first?.first?.sourceTime, CMTime(value: 10033, timescale: 1000))
+  }
+
+  func testCameraContextExitInvalidatesBothHeldStagesAndReturnsStopped() throws {
+    for held in [false, true] {
+      let fixture = CaptureFixture()
+      fixture.start()
+      try fixture.feed(1...4)
+      fixture.camera.receiveSampleBuffer(try LifecycleFixture.sample(5))
+      if held { fixture.pipeline.worker.drain() }
+      fixture.camera.setContextActive(false)
+      fixture.pipeline.flush()
+      XCTAssertEqual(fixture.frames, 4)
+      XCTAssertEqual(fixture.tracks, 0)
+      XCTAssertEqual(fixture.cues, 0)
+      XCTAssertNil(fixture.pipeline.manager.ballPosition)
+      XCTAssertTrue(fixture.pipeline.pose.detectedPose.isEmpty)
+      fixture.camera.setContextActive(true)
+      XCTAssertFalse(fixture.camera.captureRequested)
+      fixture.start()
+      try fixture.feed(1...9)
+      XCTAssertEqual(fixture.cues, 1)
+    }
+  }
+
+  func testSceneSuspensionClosesBothAdaptersAndReturnDoesNotResume() throws {
+    for held in [false, true] {
+      let camera = CaptureFixture()
+      let playback = try PlaybackFixture()
+      camera.start(); playback.play()
+      try camera.feed(1...4); try playback.feed(1...4)
+      camera.camera.receiveSampleBuffer(try LifecycleFixture.sample(5)); playback.offer(5)
+      if held { camera.pipeline.worker.drain(); playback.pipeline.worker.drain() }
+      camera.camera.setContextActive(false); playback.player.setContextActive(false)
+      camera.pipeline.flush(); playback.pipeline.flush()
+      XCTAssertEqual(camera.cues + playback.cues, 0)
+      XCTAssertEqual(camera.frames + playback.frames, 8)
+      XCTAssertEqual(camera.tracks + playback.tracks, 0)
+      XCTAssertTrue(camera.pipeline.pose.detectedPose.isEmpty)
+      XCTAssertTrue(playback.pipeline.pose.detectedPose.isEmpty)
+      camera.camera.setContextActive(true); playback.player.setContextActive(true)
+      XCTAssertFalse(camera.camera.captureRequested)
+      XCTAssertFalse(playback.player.isPlaying)
+      camera.start(); playback.play()
+      try camera.feed(1...9); try playback.feed(1...9)
+      XCTAssertEqual(camera.cues + playback.cues, 2)
+    }
+  }
+
+  func testCurrentModePoseSurvivesRetiredModesDelayedClear_InBothDirections() throws {
+    for cameraWasOld in [false, true] {
+      let camera = CaptureFixture()
+      let playback = try PlaybackFixture()
+      camera.start(); playback.play()
+      let old = cameraWasOld ? camera.pipeline : playback.pipeline
+      let current = cameraWasOld ? playback.pipeline : camera.pipeline
+      if cameraWasOld {
+        camera.camera.receiveSampleBuffer(try LifecycleFixture.sample(1))
+        old.worker.drain()
+        camera.camera.setContextActive(false)
+        try playback.feed(1...9)
+      } else {
+        playback.offer(1)
+        old.worker.drain()
+        playback.player.setContextActive(false)
+        try camera.feed(1...9)
+      }
+      let point = current.pose.detectedPose[.nose]?.location
+      let ball = current.manager.ballPosition
+      XCTAssertNotNil(point)
+      XCTAssertNotNil(ball)
+      old.publication.drain()
+      XCTAssertTrue(old.pose.detectedPose.isEmpty)
+      XCTAssertEqual(current.pose.detectedPose[.nose]?.location, point)
+      XCTAssertEqual(current.manager.ballPosition, ball)
+      if cameraWasOld { playback.player.pause() } else { camera.camera.stopCapture() }
+      current.flush()
+      XCTAssertTrue(current.pose.detectedPose.isEmpty)
+      XCTAssertNil(current.manager.ballPosition)
+    }
+  }
+
+  func testReentrantStopAndPauseDuringTrackPublicationSuppressCueAndFrame() throws {
+    let camera = CaptureFixture()
+    camera.start()
+    try camera.feed(1...4)
+    camera.pipeline.manager.onBallTrack = { _ in camera.camera.stopCapture() }
+    try camera.feed(5...5)
+    XCTAssertEqual(camera.frames, 4)
+    XCTAssertEqual(camera.cues, 0)
+    XCTAssertNil(camera.pipeline.manager.ballPosition)
+    camera.pipeline.manager.onBallTrack = nil
+    camera.start()
+    try camera.feed(1...9)
+    XCTAssertEqual(camera.cues, 1)
+
+    let playback = try PlaybackFixture()
+    playback.play()
+    try playback.feed(1...4)
+    playback.pipeline.manager.onBallTrack = { _ in playback.player.pause() }
+    try playback.feed(5...5)
+    XCTAssertEqual(playback.frames, 4)
+    XCTAssertEqual(playback.cues, 0)
+    XCTAssertNil(playback.pipeline.manager.ballPosition)
+    playback.pipeline.manager.onBallTrack = nil
+    playback.play()
+    try playback.feed(1...9)
+    XCTAssertEqual(playback.cues, 1)
+  }
+
+  func testRepeatedPlayOwnsOneLoopAndFreshCueAfterPause() throws {
+    let fixture = try PlaybackFixture()
+    fixture.play()
+    for _ in 0..<100 { fixture.player.play() }
+    XCTAssertEqual(fixture.starts, 1)
+    try fixture.feed(1...9)
+    XCTAssertEqual(fixture.cues, 1)
+    for _ in 0..<100 { fixture.player.pause() }
+    XCTAssertEqual(fixture.stops, 1)
+    fixture.pipeline.flush()
+    fixture.player.setContextActive(false)
+    fixture.player.play()
+    XCTAssertFalse(fixture.player.isPlaying)
+    fixture.player.setContextActive(true)
+    fixture.play()
+    try fixture.feed(1...4)
+    XCTAssertEqual(fixture.cues, 1)
+    try fixture.feed(5...9)
+    XCTAssertEqual(fixture.cues, 2)
+    XCTAssertEqual(fixture.starts, 2)
   }
 
   func testStopInvalidatesHeldPublication_BeforePhysicalTeardown() throws {
@@ -137,6 +313,36 @@ final class PracticeLifecycleTests: XCTestCase {
     XCTAssertEqual(fixture.pipeline.manager.diagnostics.admitted, 0)
     XCTAssertFalse(fixture.camera.isRecording)
     XCTAssertTrue(fixture.camera.captureRequested, "Stop stays available")
+  }
+}
+
+private final class PlaybackFixture {
+  let pipeline = LifecyclePipeline()
+  let output: LifecycleOutput
+  var frames = 0
+  var cues = 0
+  var tracks = 0
+  var starts = 0
+  var stops = 0
+  var onPause: (() -> Void)?
+  lazy var player: VideoPlayerManager = {
+    let player = VideoPlayerManager(dependencies: .init(play: { true },
+      pause: { [weak self] in self?.onPause?() },
+      startLoop: { [weak self] in self?.starts += 1 }, stopLoop: { [weak self] in self?.stops += 1 }))
+    player.setupBallDetection(with: pipeline.pose, factory: { [unowned self] _ in pipeline.manager })
+    player.onFrameProcessed = { [weak self] in self?.frames += 1 }
+    player.onApex = { [weak self] in self?.cues += 1 }
+    pipeline.manager.onBallTrack = { [weak self] _ in self?.tracks += 1 }
+    return player
+  }()
+  init() throws { output = try LifecycleOutput() }
+  func play() { player.play(); pipeline.flush() }
+  func offer(_ index: Int) {
+    output.time = CMTime(value: Int64(10000 + index * 33), timescale: 1000)
+    player.processPlaybackFrame(output: output, requestedTime: CMTime(value: 900, timescale: 1), orientation: .left)
+  }
+  func feed(_ range: ClosedRange<Int>) throws {
+    for index in range { offer(index); pipeline.flush() }
   }
 }
 

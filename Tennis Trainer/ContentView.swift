@@ -16,8 +16,10 @@ enum AppMode: String, CaseIterable {
 struct ContentView: View {
     @StateObject private var cameraManager = CameraManager()
     @StateObject private var audioManager = AudioManager()
-    @StateObject private var poseDetectionManager = PoseDetectionManager()
+    @StateObject private var cameraPoseManager = PoseDetectionManager()
+    @StateObject private var playbackPoseManager = PoseDetectionManager()
     @StateObject private var videoPlayerManager = VideoPlayerManager()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var frameCount = 0
     @State private var lastFrameTime = Date()
     @State private var fps: Double = 0
@@ -51,12 +53,14 @@ struct ContentView: View {
             }
         }
         .onAppear {
-            cameraManager.poseDetectionManager = poseDetectionManager
-            cameraManager.setupBallDetection(with: poseDetectionManager)
-            videoPlayerManager.poseDetectionManager = poseDetectionManager
-            videoPlayerManager.setupBallDetection(with: poseDetectionManager)
+            cameraManager.poseDetectionManager = cameraPoseManager
+            cameraManager.setupBallDetection(with: cameraPoseManager)
+            videoPlayerManager.poseDetectionManager = playbackPoseManager
+            videoPlayerManager.setupBallDetection(with: playbackPoseManager)
+            updateActiveContexts()
             
             cameraManager.onFrameProcessed = {
+                guard currentMode == .liveCamera, scenePhase == .active else { return }
                 frameCount += 1
                 
                 let now = Date()
@@ -69,6 +73,7 @@ struct ContentView: View {
             }
             
             videoPlayerManager.onFrameProcessed = {
+                guard currentMode == .videoPlayback, scenePhase == .active else { return }
                 frameCount += 1
                 
                 let now = Date()
@@ -81,11 +86,18 @@ struct ContentView: View {
             }
 
             cameraManager.onApex = {
+                guard currentMode == .liveCamera, scenePhase == .active else { return }
                 audioManager.playBeep()
             }
             videoPlayerManager.onApex = {
+                guard currentMode == .videoPlayback, scenePhase == .active else { return }
                 audioManager.playBeep()
             }
+        }
+        .onChange(of: scenePhase) { _, _ in updateActiveContexts() }
+        .onDisappear {
+            cameraManager.setContextActive(false)
+            videoPlayerManager.setContextActive(false)
         }
         .onChange(of: selectedVideoURL) { _, newURL in
             if let url = newURL {
@@ -111,7 +123,7 @@ struct ContentView: View {
                         ]
                         
                         ForEach(rightArmJoints, id: \.self) { jointName in
-                            if let point = poseDetectionManager.detectedPose[jointName] {
+                            if let point = cameraPoseManager.detectedPose[jointName] {
                                 Circle()
                                     .fill(jointColor(for: jointName))
                                     .frame(width: 6, height: 6)
@@ -123,14 +135,8 @@ struct ContentView: View {
                         }
 
                         // Ball overlay (live camera)
-                        if let pos = cameraManager.ballDetectionManager?.ballPosition {
-                            Circle()
-                                .stroke(Color.yellow, lineWidth: 2)
-                                .frame(width: 14, height: 14)
-                                .position(
-                                    x: pos.x * geometry.size.width,
-                                    y: (1 - pos.y) * geometry.size.height
-                                )
+                        if let manager = cameraManager.ballDetectionManager {
+                            BallOverlayView(manager: manager, size: geometry.size)
                         }
                     }
                 }
@@ -155,7 +161,7 @@ struct ContentView: View {
                         Spacer()
                         
                         VStack(alignment: .trailing) {
-                            Text("Joints: \(poseDetectionManager.detectedPose.count)")
+                            Text("Joints: \(cameraPoseManager.detectedPose.count)")
                                 .foregroundColor(.white)
                                 .font(.caption)
                         }
@@ -239,7 +245,7 @@ struct ContentView: View {
                             ]
                             
                             ForEach(rightArmJoints, id: \.self) { jointName in
-                                if let point = poseDetectionManager.detectedPose[jointName] {
+                                if let point = playbackPoseManager.detectedPose[jointName] {
                                     Circle()
                                         .fill(jointColor(for: jointName))
                                         .frame(width: 6, height: 6)
@@ -251,14 +257,8 @@ struct ContentView: View {
                             }
 
                             // Ball overlay (video)
-                            if let pos = videoPlayerManager.ballDetectionManager?.ballPosition {
-                                Circle()
-                                    .stroke(Color.yellow, lineWidth: 2)
-                                    .frame(width: 14, height: 14)
-                                    .position(
-                                        x: pos.x * geometry.size.width,
-                                        y: (1 - pos.y) * geometry.size.height
-                                    )
+                            if let manager = videoPlayerManager.ballDetectionManager {
+                                BallOverlayView(manager: manager, size: geometry.size)
                             }
                         }
                         .aspectRatio(16/9, contentMode: .fit)
@@ -273,7 +273,7 @@ struct ContentView: View {
                                     .foregroundColor(.white)
                                     .font(.caption)
                                     .monospaced()
-                                Text("Joints: \(poseDetectionManager.detectedPose.count)")
+                                Text("Joints: \(playbackPoseManager.detectedPose.count)")
                                     .foregroundColor(.white)
                                     .font(.caption)
                             }
@@ -366,25 +366,27 @@ struct ContentView: View {
     }
     
     private func handleModeChange(to newMode: AppMode) {
+        // Always retire the outgoing owner, including pending or already paused work.
+        updateActiveContexts()
+        frameCount = 0
+        fps = 0
+        lastFrameTime = Date()
         switch newMode {
         case .liveCamera:
             // Stop video player and start camera
-            videoPlayerManager.pause()
-            if cameraManager.hasPermission && !cameraManager.isRecording {
+            if cameraManager.hasPermission && scenePhase == .active {
                 cameraManager.startCapture()
             }
         case .videoPlayback:
             // Stop camera recording when switching to video mode
-            if cameraManager.isRecording {
-                cameraManager.stopCapture()
-            }
-            // Reset frame count and fps when switching modes
-            frameCount = 0
-            fps = 0
-            lastFrameTime = Date()
             // Refresh video player connection after mode switch
             videoPlayerManager.refreshPlayerLayerConnection()
         }
+    }
+
+    private func updateActiveContexts() {
+        cameraManager.setContextActive(scenePhase == .active && currentMode == .liveCamera)
+        videoPlayerManager.setContextActive(scenePhase == .active && currentMode == .videoPlayback)
     }
     
     private func formatTime(_ seconds: Double) -> String {
@@ -406,6 +408,21 @@ struct ContentView: View {
             return .yellow
         }
     }
+}
+
+// Observe the nested publisher directly: resets redraw even without a new FPS tick.
+private struct BallOverlayView: View {
+  @ObservedObject var manager: BallDetectionManager
+  let size: CGSize
+
+  var body: some View {
+    if let pos = manager.ballPosition {
+      Circle()
+        .stroke(Color.yellow, lineWidth: 2)
+        .frame(width: 14, height: 14)
+        .position(x: pos.x * size.width, y: (1 - pos.y) * size.height)
+    }
+  }
 }
 
 #Preview {

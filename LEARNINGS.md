@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Lifecycle regression simulator recovery**
+- Observation: The full Phase 2 unit run passed its lifecycle tests but Xcode could not launch its second parallel simulator clone. Re-running the same complete unit target with `-parallel-testing-enabled NO` passed all 82 tests, including the Swift Testing scaffold.
+- Action: If a future full run fails at parallel clone launch, retain that infrastructure evidence and rerun the complete target serially; require all class counts and zero skips before accepting the result.
+- Confidence: medium
+
 **2026-09-26 — Phase 2 playback plan review**
 - Observation: Item/load identity alone in the draft end-event guard could not distinguish a queued notification from a previous playback timeline after seeking or replaying the same item. The independent checker caught this before implementation.
 - Action: Bind end/error events to their originating playback run or reconcile fresh backend state after dispatch. Hold same-item notifications across a successful newer seek/Replay and verify the current run continues while valid current events still work.

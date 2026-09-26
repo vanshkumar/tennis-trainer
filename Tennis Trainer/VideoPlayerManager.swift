@@ -1,7 +1,25 @@
 import AVFoundation
 import SwiftUI
 
-class VideoPlayerManager: ObservableObject {
+final class VideoPlayerManager: ObservableObject {
+    // Control state and display-link delivery are owned by the main executor.
+    // Tests replace AV effects, while using the same controls and frame ingress.
+    struct Dependencies {
+      var play: () -> Bool
+      var pause: () -> Void
+      var startLoop: () -> Void
+      var stopLoop: () -> Void
+    }
+    private let dependencies: Dependencies?
+    private var contextActive = true
+    private var ingressOpen = false
+    private var frameRun = UUID()
+    private var loopActive = false
+
+    init(dependencies: Dependencies? = nil) {
+      self.dependencies = dependencies
+    }
+
     protocol FrameOutputReading {
         func hasNewPixelBuffer(forItemTime time: CMTime) -> Bool
         func copyFrame(forItemTime time: CMTime) -> (CVPixelBuffer, CMTime)?
@@ -97,11 +115,17 @@ class VideoPlayerManager: ObservableObject {
     }
     
     private func startFrameProcessing() {
+        guard !loopActive else { return }
+        loopActive = true
+        if let dependencies { dependencies.startLoop(); return }
         displayLink = CADisplayLink(target: self, selector: #selector(processDisplayLinkFrame))
         displayLink?.add(to: .main, forMode: .common)
     }
     
     private func stopFrameProcessing() {
+        guard loopActive else { return }
+        loopActive = false
+        if let dependencies { dependencies.stopLoop(); return }
         displayLink?.invalidate()
         displayLink = nil
     }
@@ -113,17 +137,32 @@ class VideoPlayerManager: ObservableObject {
             return
         }
         
-        processCurrentFrame(output: PlayerOutputReader(output: videoOutput),
+        processPlaybackFrame(output: PlayerOutputReader(output: videoOutput),
                             requestedTime: player.currentTime(), orientation: getVideoOrientation())
     }
 
     func processCurrentFrame(output: FrameOutputReading, requestedTime: CMTime,
-                             orientation: CGImagePropertyOrientation) {
+                             orientation: CGImagePropertyOrientation,
+                             requiresActiveContext: Bool = false) {
+        guard !requiresActiveContext || (contextActive && ingressOpen && isPlaying),
+              let manager = ballDetectionManager else { return }
+        let generation = manager.admissionGeneration
+        let source = sourceID
+        let run = frameRun
+        let item = playerItem
         guard output.hasNewPixelBuffer(forItemTime: requestedTime),
               let (pixels, time) = output.copyFrame(forItemTime: requestedTime) else { return }
-        ballDetectionManager?.process(input: .init(
-            pixelBuffer: pixels, sourceTime: time, orientation: orientation, sourceID: sourceID
-        ))
+        guard source == sourceID, run == frameRun, item === playerItem,
+              !requiresActiveContext || (contextActive && ingressOpen && isPlaying) else { return }
+        manager.process(input: .init(
+            pixelBuffer: pixels, sourceTime: time, orientation: orientation, sourceID: source
+        ), expectedGeneration: generation)
+    }
+
+    func processPlaybackFrame(output: FrameOutputReading, requestedTime: CMTime,
+                              orientation: CGImagePropertyOrientation) {
+      processCurrentFrame(output: output, requestedTime: requestedTime,
+        orientation: orientation, requiresActiveContext: true)
     }
     
     private func getVideoOrientation() -> CGImagePropertyOrientation {
@@ -158,22 +197,37 @@ class VideoPlayerManager: ObservableObject {
     }
     
     func play() {
-        guard let player = player else { return }
-        
-        // Ensure player layer is connected
-        if let layer = playerLayer, layer.player !== player {
+        guard contextActive, !isPlaying else { return }
+        if let dependencies {
+          guard dependencies.play() else { return }
+        } else {
+          guard let player else { return }
+
+          // Ensure player layer is connected.
+          if let layer = playerLayer, layer.player !== player {
             layer.player = player
+          }
+          player.play()
         }
-        
-        player.play()
+        frameRun = UUID()
+        ballDetectionManager?.resetTrackingState()
+        ingressOpen = true
         isPlaying = true
-        startFrameProcessing()
+        if ingressOpen && isPlaying { startFrameProcessing() }
     }
     
     func pause() {
-        player?.pause()
+        ingressOpen = false
+        frameRun = UUID()
+        ballDetectionManager?.resetTrackingState()
         isPlaying = false
+        if let dependencies { dependencies.pause() } else { player?.pause() }
         stopFrameProcessing()
+    }
+
+    func setContextActive(_ active: Bool) {
+      contextActive = active
+      if !active { pause() }
     }
     
     // Method to refresh player layer connection if needed
@@ -221,6 +275,7 @@ class VideoPlayerManager: ObservableObject {
 
     func setupBallDetection(with pose: PoseDetectionManager,
                             factory: ((PoseDetectionManager) -> BallDetectionManager)? = nil) {
+        guard ballDetectionManager == nil else { return }
         guard factory != nil || !AppRuntime.isRunningTests else { return }
         // Video overlay favors the freshest frame to avoid visible lag.
         let manager = factory?(pose) ?? BallDetectionManager(poseDetectionManager: pose, overlayTIndex: 4)
@@ -232,15 +287,11 @@ class VideoPlayerManager: ObservableObject {
     }
     
     private func cleanup() {
+        pause()
         if let timeObserver = timeObserver {
             player?.removeTimeObserver(timeObserver)
             self.timeObserver = nil
         }
-        
-        player?.pause()
-        
-        // Stop frame processing
-        stopFrameProcessing()
         
         // Clean up video output
         if let videoOutput = videoOutput, let playerItem = playerItem {
@@ -253,8 +304,6 @@ class VideoPlayerManager: ObservableObject {
             layer.player = nil
             playerLayer = nil
         }
-        
-        ballDetectionManager?.resetTrackingState()
         
         player = nil
         playerItem = nil
