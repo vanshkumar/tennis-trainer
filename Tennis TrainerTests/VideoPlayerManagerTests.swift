@@ -3,6 +3,25 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testRetiredSessionFileSurvivesPendingSeekConsumer() {
+    var removed: [URL] = []
+    var completion: ((Bool) -> Void)?
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in },
+      remove: { removed.append($0) }, state: { $0() }))
+    let player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {},
+      seek: { _, callback in completion = callback }))
+    let request = player.beginReplacement()
+    importer.begin(request: request) { player.acceptImport($1, request: $0) }
+    importer.receiveSelection(request: request) { callback in
+      callback(URL(fileURLWithPath: "/provider/clip.mov"), nil); return Progress()
+    }
+    player.seek(to: 4)
+    player.shutdown()
+    XCTAssertTrue(removed.isEmpty, "Retirement must not delete a still-consumed seek file")
+    completion?(true)
+    completion = nil
+    XCTAssertEqual(removed.count, 1)
+  }
   func testCandidatesRequireValidMetadataAndReadinessInEitherOrder() {
     for readyFirst in [false, true] {
       let f = CandidateEffects()
