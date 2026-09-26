@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Simulator result finalization**
+- Observation: Xcode printed all 145 passing tests but stalled in XCTHRunDestinationAllocator.collectSimulatorDiagnostics, leaving the bundle incomplete. The unchanged full suite finalized successfully with `-collect-test-diagnostics never`.
+- Action: Require successful xcodebuild exit and a finalized result summary, not just passing test log lines. If this host repeats the diagnostic-collection stall, retain the incomplete attempt and rerun the complete selector set with that supported flag.
+- Confidence: high
+
 **2026-09-26 — Imported media consumer lifetimes**
 - Observation: The retirement regression deleted an imported file during shutdown while a seek completion still retained its AV consumer. Cancelling metadata work similarly does not prove that the suspended asset reader has finished.
 - Action: Retain the explicit media handle through metadata, readiness, seek, event, time and executing frame-reader callbacks; release session ownership only after original-owner AV teardown. Keep provider copying synchronous and distinguish pre-selection dismissal from dismissal while a selected provider is pending.
@@ -39,9 +44,9 @@
 - Confidence: high
 
 **2026-09-26 — Phase 2 lifecycle planning**
-- Observation: Source inspection found both media managers sharing one pose presenter while invalidated publications can clear it, and camera ingress checks its enabled flag separately from analysis admission. These expose old-mode clearing and Stop/Start admission races beyond Phase 1's manager-generation tests; they have not yet been reproduced by Phase 2 tests.
-- Action: Test an old mode's delayed clear after the new mode publishes pose, plus acquired and queued camera callbacks crossing Stop/Start. Require mode-owned or source-gated presentation and an ingress boundary that cannot assign old frames to a fresh generation.
-- Confidence: medium
+- Observation: Phase 2 lifecycle regressions reproduced stale work across the camera check/admission and queued-callback boundaries. The completed tests also verify that delayed old-mode clears cannot erase the new mode's pose; source separation and directly observed ball presentation preserve immediate clearing.
+- Action: Retain separate mode-owned pose presenters, expected-generation admission under the scheduler lock, and the stop/detach/drain restart fence. Keep acquired-buffer and already-queued callback regressions distinct.
+- Confidence: high
 
 **2026-09-26 — Phase 1 human acceptance**
 - Observation: The user separately passed the evidence-limit review, original-five-frame association contract, and exact source/session/frame pose with the strict fallback above 0.70. These decisions resolve Phase 1's previously undefined edge obligations without adding runtime measurements.

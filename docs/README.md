@@ -50,3 +50,5 @@ For a fresh session, use `RAMPUP.md` after reading this file.
 - Architecture: `../ARCHITECTURE.md`
 - GridTrackNet reference: `../GRIDTRACKNET_COREML.md`
 - Ramp-up guide: `RAMPUP.md`
+- Cue evidence and measurement obligations: `references/toss-cue-validation.md`
+- Practice-control evidence and device checks: `references/practice-controls-validation.md`

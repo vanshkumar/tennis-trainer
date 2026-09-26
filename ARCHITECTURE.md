@@ -22,9 +22,13 @@ The repository is now aligned around the serve-training product:
 - `Tennis Trainer/ContentView.swift`
   Wires the app together, selects mode, renders overlays and controls.
 - `Tennis Trainer/CameraManager.swift`
-  Owns the live camera capture session and sends frames into pose + ball detection.
+  Owns camera authorization, capture intent and actual session state, and admits current frames into pose + ball detection.
 - `Tennis Trainer/VideoPlayerManager.swift`
-  Owns AVPlayer playback and frame extraction for offline analysis.
+  Owns AVPlayer playback, candidate validation, seek/timeline identity and frame extraction for offline analysis.
+- `Tennis Trainer/VideoImportManager.swift`
+  Copies temporary picker representations into uniquely named app-owned files and tracks their consumer leases.
+- `Tennis Trainer/AppRuntime.swift`
+  Constructs production services or explicit DEBUG UI scenarios with injected effects before camera, model or audio setup.
 - `Tennis Trainer/PoseDetectionManager.swift`
   Runs Vision pose detection and exposes tracked joints plus retained arm-angle helpers for future stroke work.
 - `Tennis Trainer/BallDetectionManager.swift`
@@ -46,21 +50,32 @@ The repository is now aligned around the serve-training product:
 
 ### Live Camera
 
-1. `ContentView` creates `CameraManager`, `PoseDetectionManager`, and `AudioManager`.
-2. `CameraManager` receives frames from `AVCaptureVideoDataOutput` and supplies the sample buffer's presentation timestamp to `BallDetectionManager`.
-3. The manager admits at most one job before scheduling pose extraction and ball analysis. New frames are dropped while that job or its publication is pending.
-4. Pose extraction and ball preparation use the same admitted image. GridTrackNet predicts from an owned five-frame window, whose decoded samples retain their original metadata.
-5. The manager publishes current results, feeds `ServeTossApexDetector`, and emits `onApex` when an eligible toss peak is confirmed. Its admission lease remains held through publication.
-6. `ContentView` receives the apex callback and calls `AudioManager.playBeep()`.
+1. `ContentView` creates a camera service, a camera-owned pose presenter, and `AudioManager`. Playback has its own pose presenter.
+2. `CameraManager` checks current authorization, then reconciles explicit capture intent with actual session state. Starting is distinct from running; Stop remains available during startup and recovery. Denied access offers Settings, restricted access explains the restriction, and active return requeries permission without creating new capture intent.
+3. Before a new capture run opens, the session queue stops capture and detaches delivery, then drains the separate callback queue. Received frames carry their captured analysis generation and sample-buffer presentation timestamp into `BallDetectionManager`.
+4. Admission compares the expected generation under the scheduler lock and admits at most one job through publication. New frames are dropped while that lease is held.
+5. Pose extraction and ball preparation use the same admitted image. GridTrackNet predicts from an owned five-frame window, whose decoded samples retain their original metadata.
+6. Current publication feeds `ServeTossApexDetector` and emits `onApex` for an eligible peak; `ContentView` calls `AudioManager.playBeep()`.
 
 ### Video Playback
 
-1. `VideoPlayerManager` loads a local video into `AVPlayer`.
-2. `AVPlayerItemVideoOutput` exposes a frame on each display-link tick. Analysis uses the acquired frame's returned display time, rather than the requested player time.
-3. `VideoPlayerManager` submits the image, media time, and orientation to the same bounded `BallDetectionManager` pipeline used for live capture.
-4. The manager rejects invalid or repeated media times before expensive work, extracts matching pose, and analyzes an owned prediction window.
-5. Current publication feeds `ServeTossApexDetector` and emits `onApex` for an eligible peak.
-6. `ContentView` receives the apex callback and calls `AudioManager.playBeep()`.
+1. The picker copies its temporary representation inside the provider callback through `VideoImportManager`. Each import uses a unique owned path; external files never acquire deletion authority.
+2. `VideoPlayerManager` pauses the committed session while a replacement candidate loads. Only the current request with playable video, finite positive duration and a ready item may replace it. Failure or cancellation preserves the prior paused clip.
+3. `AVPlayerItemVideoOutput` exposes a frame on each display-link tick. Analysis uses the acquired frame's returned display time, rather than the requested player time.
+4. `VideoPlayerManager` submits the image, media time, and orientation to the same bounded `BallDetectionManager` pipeline used for live capture.
+5. The manager rejects invalid or repeated media times before expensive work, extracts matching pose, and analyzes an owned prediction window.
+6. Current publication feeds `ServeTossApexDetector` and emits `onApex` for an eligible peak; `ContentView` calls `AudioManager.playBeep()`.
+7. Retiring a playback session removes its original observer, output, layer and loop. Outstanding asynchronous consumers keep media leases until they finish; an owned file is removed only after its last lease is released.
+
+### Practice Controls
+
+- Stop, Pause, mode exit and scene suspension close frame admission and invalidate analysis before asynchronous framework teardown. Scene return restores eligibility; it does not recreate cleared Start/Play intent. Explicit live-mode entry retains its Start behavior.
+- Each mode owns its pose presentation, and the ball overlay observes its analysis manager directly. An old mode's clearing publication cannot erase the active mode's pose.
+- Camera session events retain their originating operation and reconcile current permission, intent and backend state after delivery. Recovery is limited to one automatic attempt per explicit Start; failure exposes Retry.
+- Seeking closes analysis immediately. Only the latest successful seek on the current item may reopen it, and only while Play remains requested. Invalid targets fail closed; a failed seek requires an explicit retry.
+- Playback event registrations retain their load and timeline identity. Native end/error notifications are reconciled against fresh backend state; an old event cannot stop a newer seek or Replay on the same item.
+- Ended stops processing. Replay seeks to zero through the completion gate and starts a fresh analysis window and cue cooldown. A weak display-link target and explicit retirement keep one intended extraction loop.
+- These implemented control contracts have deterministic and UI regression coverage. Physical permission, capture, local-media inspection and audio timing remain separate acceptance evidence.
 
 ## Detection Boundaries
 
@@ -87,7 +102,7 @@ The repository is now aligned around the serve-training product:
 - `GridTrackNetDetector` prepares app-owned pixels, applies caller-provided frame orientation, and predicts from an immutable five-frame window. Each decoded sample carries its originating frame's metadata.
 - `BallDetectionManager.onBallTrack` remains an optional observation callback; the manager also feeds its built-in `ServeTossApexDetector` during guarded publication.
 - `ServeTossApexDetector` consumes each source identity once, retains three samples for peak evaluation, and keeps its rational-time watermark after history eviction. The four-second cue cooldown is a separate rule.
-- Manager-authorized source/generation resets invalidate old publication and reset the cue identity domain. Complete camera and playback control-transition acceptance belongs to Phase 2 of the reliability roadmap.
+- Manager-authorized source/generation resets invalidate old publication and reset the cue identity domain. The single lease remains held until obsolete work and its publication finish; resetting does not reopen scheduler capacity early.
 
 ## Architectural Boundaries
 
@@ -104,3 +119,4 @@ The codebase is small, so the main boundary to preserve is responsibility separa
 - `PRD.MD` for current product behavior/spec
 - `GRIDTRACKNET_COREML.md` for model conversion and decode details
 - `docs/references/toss-cue-validation.md` for the preserved baseline, deterministic evidence, resource bounds, and outstanding clip/device/audio measurements
+- `docs/references/practice-controls-validation.md` for control/import evidence and pending device and human acceptance checks

@@ -23,14 +23,14 @@ Use this file when starting a fresh session in the repo. The goal is to answer f
    Active work pointer. Confirm whether a root `*_IMPL.md` brief actually exists before assuming one is checked in.
 7. `references/README.md`
    Technical references. Read `../GRIDTRACKNET_COREML.md` before changing GridTrackNet conversion or decoding behavior.
-8. `../.codex/LEARNINGS.md`
+8. `../LEARNINGS.md`
    Prior friction points, fixes, and signposts.
 
 ## Current Repo Reality
 
 - Product focus is the serve.
 - The live cue in the codebase is the serve toss-apex beep.
-- `ServeTossApexDetector` is the first cue-specific detector wired onto `BallDetectionManager.onBallTrack`.
+- `BallDetectionManager` feeds `ServeTossApexDetector` during guarded publication; `onBallTrack` remains an optional observation callback.
 - The old forehand cue is archived, not deleted.
 - GridTrackNet is the default ball detector backend; the color+Kalman path is fallback-only.
 
@@ -54,11 +54,11 @@ Use this file when starting a fresh session in the repo. The goal is to answer f
 - Root-level active briefs are easy to reference implicitly but may not actually be checked in. Confirm the file exists before treating it as current source of truth.
 - Under `PBXFileSystemSynchronizedRootGroup`, docs added under `Tennis Trainer/` can become bundle resources. Archive docs inside the app tree need unique filenames.
 - `xcodebuild` failures in this repo are not always code failures. Check Xcode first-launch state, simulator availability, and first-boot status before debugging app logic.
-- `Tennis TrainerTests` currently carries the meaningful automated coverage; UI tests are still mostly scaffolding.
+- Unit tests cover analysis and delayed lifecycle events; UI tests exercise permission, capture and playback controls through DEBUG-injected effects. Real camera, Settings, representative clip and audio evidence remains separate.
 - Pre-existing `.DS_Store` changes may appear in the worktree and are not task-related.
 
 ## Minimal Session Checklist
 
 - Confirm the active work pointer in `plans/active/README.md` matches reality.
-- Read `.codex/LEARNINGS.md` before repeating local environment investigation.
+- Read the root `LEARNINGS.md` before repeating local environment investigation.
 - If changing durable behavior or workflow assumptions, update docs rather than leaving them only in chat context.

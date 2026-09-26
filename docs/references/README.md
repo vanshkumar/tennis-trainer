@@ -10,6 +10,9 @@ Technical and implementation references that support the codebase.
 - `toss-cue-validation.md`
   Baseline provenance, deterministic cue and resource-bound checks, and outstanding clip/device/audio evidence.
 
+- `practice-controls-validation.md`
+  Lifecycle, camera, playback and import regression evidence, plus pending physical-device and human acceptance checks.
+
 ## When To Add Here
 
 Add a reference entry when the document is:
