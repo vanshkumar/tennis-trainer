@@ -13,7 +13,7 @@ enum AppRuntime {
             arguments.indices.contains(index + 1) else { return nil }
       let name = arguments[index + 1]
       return ["permission-undetermined", "permission-denied-return", "permission-restricted",
-              "capture-startup", "capture-recovery", "capture-failure", "playback-seek"]
+              "capture-startup", "capture-recovery", "capture-failure", "playback-seek", "playback-end"]
         .contains(name) ? name : nil
       #else
       return nil
@@ -68,15 +68,27 @@ enum AppRuntime {
 
     static func makeVideoPlayerManager() -> VideoPlayerManager {
       #if DEBUG
-      if practiceUIScenario == "playback-seek" {
+      if let scenario = practiceUIScenario, scenario.hasPrefix("playback-") {
         let effects = PlaybackScenarioEffects()
-        let manager = VideoPlayerManager(dependencies: .init(play: { true }, pause: {},
+        let manager = VideoPlayerManager(dependencies: .init(play: {
+          effects.stopped = false
+          if scenario == "playback-end" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+              effects.position = CMTime(value: 30, timescale: 1)
+              effects.stopped = true
+              effects.event?(.ended)
+            }
+          }
+          return true
+        }, pause: {},
           startLoop: {}, stopLoop: {}, seek: { target, completion in
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
               effects.position = target
               completion(true)
             }
-          }, currentTime: { effects.position }))
+          }, currentTime: { effects.position },
+          observeEvents: { callback in effects.event = callback; return { effects.event = nil } },
+          snapshot: { .init(position: effects.position, stopped: effects.stopped, failed: false) }))
         manager.loadVideo(from: URL(fileURLWithPath: "/scripted-playback.mov"))
         return manager
       }
@@ -87,6 +99,8 @@ enum AppRuntime {
     #if DEBUG
     private final class PlaybackScenarioEffects {
       var position = CMTime.zero
+      var stopped = false
+      var event: ((VideoPlayerManager.ItemEvent) -> Void)?
     }
     private final class CameraScenarioEffects {
       var authorization: AVAuthorizationStatus

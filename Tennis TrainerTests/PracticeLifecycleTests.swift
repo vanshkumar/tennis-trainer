@@ -3,6 +3,114 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testRetiredItemTickCannotEnterReplacementButFreshItemCanCue() throws {
+    let f = try PlaybackFixture()
+    f.play(); try f.feed(1...9)
+    let oldTick = try XCTUnwrap(f.ticks.last)
+    let oldSource = f.pipeline.windows.last?.last?.identity.sourceID
+    f.player.loadVideo(from: URL(fileURLWithPath: "/replacement.mov"))
+    f.play()
+    oldTick(); f.pipeline.flush()
+    XCTAssertEqual(f.frames, 9)
+    for index in 1...9 { f.tick(index) }
+    XCTAssertEqual(f.frames, 18)
+    XCTAssertEqual(f.cues, 2)
+    XCTAssertNotEqual(f.pipeline.windows.last?.last?.identity.sourceID, oldSource)
+    XCTAssertEqual(f.starts - f.stops, 1)
+  }
+
+  func testSameItemHeldEndAndErrorCannotStopNewSeekOrReplayAndFreshCue() throws {
+    for event in [VideoPlayerManager.ItemEvent.ended, .failed] {
+      for replay in [false, true] {
+        let f = try PlaybackFixture()
+        f.play(); try f.feed(1...9)
+        XCTAssertEqual(f.cues, 1)
+        let oldEvent = try XCTUnwrap(f.events.last)
+        let oldTick = try XCTUnwrap(f.ticks.last)
+        f.position = CMTime(value: 30, timescale: 1)
+        f.stopped = true; f.failed = event == .failed
+        f.holdState = true
+        oldEvent(event) // Capture old owner, then hold BEFORE state acceptance.
+        XCTAssertEqual(f.stateJobs.count, 1)
+        f.holdState = false
+        f.failed = false
+        if replay {
+          f.events.last?(.ended)
+          XCTAssertEqual(f.player.playbackState, .ended)
+          f.player.replay()
+        } else { f.player.seek(to: 2) }
+        f.seekCompletions.last?(true)
+        f.pipeline.flush()
+        f.timeBase = replay ? 0 : 2000
+        let starts = f.starts, stops = f.stops
+        let position = f.player.currentTime
+        f.drainState()
+        XCTAssertTrue(f.player.playRequested)
+        XCTAssertTrue(f.player.isPlaying)
+        XCTAssertEqual(f.player.playbackState, .playing)
+        XCTAssertEqual(f.player.currentTime, position)
+        XCTAssertEqual(f.starts, starts)
+        XCTAssertEqual(f.stops, stops)
+        XCTAssertEqual(f.activeObservers, 1)
+        // Delivery to the NEW registration still needs fresh backend proof.
+        f.events.last?(event)
+        XCTAssertTrue(f.player.isPlaying)
+        let frameCount = f.frames
+        oldTick()
+        f.pipeline.flush()
+        XCTAssertEqual(f.frames, frameCount, "Retired tick cannot enter the new run")
+        for index in 1...4 { f.tick(index) }
+        XCTAssertEqual(f.pipeline.manager.diagnostics.preparedRingCount, 4)
+        XCTAssertEqual(f.cues, 1)
+        for index in 5...9 { f.tick(index) }
+        XCTAssertEqual(f.frames, frameCount + 9)
+        XCTAssertEqual(f.cues, 2, "New timeline must cue inside old cooldown")
+        XCTAssertEqual(f.starts - f.stops, 1)
+        // A matching registration still cannot turn an ambiguous OLD native
+        // notification into proof. Healthy backend state wins.
+        f.failed = event == .failed
+        f.stopped = true; f.position = CMTime(value: 30, timescale: 1)
+        f.events.last?(event)
+        XCTAssertFalse(f.player.isPlaying)
+        XCTAssertFalse(f.player.playRequested)
+        XCTAssertEqual(f.starts - f.stops, 0)
+        XCTAssertEqual(f.activeObservers, 0)
+        if event == .ended { XCTAssertEqual(f.player.playbackState, .ended) }
+        else { XCTAssertEqual(f.player.playbackState, .failed("Playback failed. Tap Play to retry.")) }
+      }
+    }
+  }
+
+  func testCurrentEndInvalidatesBothHeldStagesAndReplayResetsCooldown() throws {
+    for heldPublication in [false, true] {
+      let f = try PlaybackFixture()
+      f.play(); try f.feed(1...9)
+      XCTAssertEqual(f.cues, 1)
+      f.offer(10)
+      if heldPublication { f.pipeline.worker.drain() }
+      f.stopped = true; f.position = CMTime(value: 30, timescale: 1)
+      f.events.last?(.ended)
+      f.pipeline.flush()
+      XCTAssertEqual(f.player.playbackState, .ended)
+      XCTAssertEqual(f.frames, 9)
+      XCTAssertEqual(f.cues, 1)
+      XCTAssertNil(f.pipeline.manager.ballPosition)
+      XCTAssertTrue(f.pipeline.pose.detectedPose.isEmpty)
+      f.player.replay()
+      XCTAssertEqual(f.position, .zero)
+      XCTAssertFalse(f.player.isPlaying)
+      f.offer(1); f.pipeline.flush()
+      XCTAssertEqual(f.frames, 9)
+      f.seekCompletions.last?(true); f.pipeline.flush()
+      f.timeBase = 0
+      try f.feed(1...4)
+      XCTAssertEqual(f.cues, 1)
+      XCTAssertEqual(f.pipeline.manager.diagnostics.preparedRingCount, 4)
+      try f.feed(5...9)
+      XCTAssertEqual(f.cues, 2)
+    }
+  }
+
   func testSeekInvalidatesBothHeldStagesAndSuccessRequiresFreshWindow() throws {
     for heldPublication in [false, true] {
       let f = try PlaybackFixture()
@@ -395,15 +503,32 @@ private final class PlaybackFixture {
   var stops = 0
   var seekCompletions: [(Bool) -> Void] = []
   var position = CMTime.zero
+  var timeBase = 10000
+  var stopped = false
+  var failed = false
+  var holdState = false
+  var stateJobs: [() -> Void] = []
+  var events: [(VideoPlayerManager.ItemEvent) -> Void] = []
+  var ticks: [() -> Void] = []
+  var activeObservers = 0
   var onPause: (() -> Void)?
   lazy var player: VideoPlayerManager = {
-    let player = VideoPlayerManager(dependencies: .init(play: { true },
+    let player = VideoPlayerManager(dependencies: .init(play: { [weak self] in self?.stopped = false; return true },
       pause: { [weak self] in self?.onPause?() },
       startLoop: { [weak self] in self?.starts += 1 }, stopLoop: { [weak self] in self?.stops += 1 },
       seek: { [weak self] target, completion in
         self?.position = target
         self?.seekCompletions.append(completion)
-      }, currentTime: { [weak self] in self?.position ?? .invalid }))
+      }, currentTime: { [weak self] in self?.position ?? .invalid },
+      state: { [weak self] job in
+        if self?.holdState == true { self?.stateJobs.append(job) } else { job() }
+      }, observeTicks: { [weak self] callback in self?.ticks.append(callback); return {} },
+      frameOutput: { [unowned self] in output },
+      observeEvents: { [weak self] callback in
+        self?.events.append(callback); self?.activeObservers += 1
+        return { [weak self] in self?.activeObservers -= 1 }
+      }, snapshot: { [weak self] in .init(position: self?.position ?? .invalid,
+        stopped: self?.stopped ?? true, failed: self?.failed ?? false) }))
     player.setupBallDetection(with: pipeline.pose, factory: { [unowned self] _ in pipeline.manager })
     player.onFrameProcessed = { [weak self] in self?.frames += 1 }
     player.onApex = { [weak self] in self?.cues += 1 }
@@ -413,8 +538,14 @@ private final class PlaybackFixture {
   }()
   init() throws { output = try LifecycleOutput() }
   func play() { player.play(); pipeline.flush() }
+  func drainState() { while !stateJobs.isEmpty { stateJobs.removeFirst()() } }
+  func tick(_ index: Int) {
+    output.time = CMTime(value: Int64(timeBase + index * 33), timescale: 1000)
+    ticks.last?()
+    pipeline.flush()
+  }
   func offer(_ index: Int) {
-    output.time = CMTime(value: Int64(10000 + index * 33), timescale: 1000)
+    output.time = CMTime(value: Int64(timeBase + index * 33), timescale: 1000)
     player.processPlaybackFrame(output: output, requestedTime: CMTime(value: 900, timescale: 1), orientation: .left)
   }
   func feed(_ range: ClosedRange<Int>) throws {

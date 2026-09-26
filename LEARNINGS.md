@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Playback effect fixture teardown**
+- Observation: VideoPlayerManager calls injected pause/loop removal during deinit. The new PlayerEffects fixture crashed after its first test when those callbacks captured an already-deallocated fixture with unowned self; weak captures preserved teardown and the complete suite passed.
+- Action: Keep playback effect teardown captures weak, and retain old tick/event closures in a manager-deallocation test to verify they neither retain nor revive the manager.
+- Confidence: high
+
 **2026-09-26 — Camera startup and notification reconciliation**
 - Observation: A failed physical start left captureRequested true and blocked every later Start. A successful start can also become obsolete before its state publication; the injected tests reproduce Stop during configure/start and backend changes before delivery.
 - Action: Retire failed intent into a visible Retry state, inspect current backend state after dispatch, and physically stop a start whose operation was retired while AVFoundation was running. Keep one automatic recovery budget per explicit Start and reopen analysis only after the callback queue drain.

@@ -9,6 +9,34 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
     @MainActor
+    func testPlaybackEndAndReplayControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-end"]
+        app.launch()
+        app.buttons["Video Playback"].tap()
+        let action = app.buttons["playback.action"]
+        let status = app.staticTexts["playback.status"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        action.tap()
+        assertLabel(status, "Ended")
+        XCTAssertEqual(action.label, "Replay")
+        action.tap()
+        assertLabel(status, "Seeking…")
+        XCTAssertEqual(action.label, "Pause")
+        action.tap()
+        assertLabel(status, "Paused")
+        XCTAssertEqual(action.label, "Play")
+        XCTAssertEqual(app.staticTexts["playback.position"].label, "0:00")
+        action.tap()
+        assertLabel(status, "Ended")
+        action.tap()
+        assertLabel(status, "Seeking…")
+        assertLabel(status, "Playing")
+        XCTAssertEqual(action.label, "Pause")
+        XCTAssertEqual(app.staticTexts["playback.position"].label, "0:00")
+    }
+
+    @MainActor
     func testPlaybackSeekControls() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--practice-ui-scenario", "playback-seek"]

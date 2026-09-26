@@ -339,7 +339,8 @@ struct ContentView: View {
                         
                         // Play/pause and other controls
                         HStack(spacing: 20) {
-                            Button(videoPlayerManager.playRequested ? "Pause" : "Play") {
+                            Button(videoPlayerManager.playbackState == .ended ? "Replay" :
+                                   (videoPlayerManager.playRequested ? "Pause" : "Play")) {
                                 if videoPlayerManager.playRequested {
                                     videoPlayerManager.pause()
                                 } else {

@@ -27,13 +27,14 @@ final class VideoPlayerManager: ObservableObject {
       var failed: Bool
     }
     enum PlaybackState: Equatable {
-      case empty, paused, seeking, playing, failed(String)
+      case empty, paused, seeking, playing, ended, failed(String)
       var label: String {
         switch self {
         case .empty: return "No video"
         case .paused: return "Paused"
         case .seeking: return "Seeking…"
         case .playing: return "Playing"
+        case .ended: return "Ended"
         case .failed(let message): return message
         }
       }
@@ -47,6 +48,8 @@ final class VideoPlayerManager: ObservableObject {
     private var retireTicks: (() -> Void)?
     private var retireTime: (() -> Void)?
     private var displayTarget: DisplayTarget?
+    private var timelineID: UUID?
+    private var retireEvents: (() -> Void)?
 
     private final class DisplayTarget: NSObject {
       weak var owner: VideoPlayerManager?
@@ -294,6 +297,7 @@ final class VideoPlayerManager: ObservableObject {
     
     func play() {
         guard contextActive, hasLoadedItem, !isPlaying else { return }
+        if playbackState == .ended { replay(); return }
         playRequested = true
         guard seekID == nil else { return }
         if let target = failedSeekTarget { seek(to: target); return }
@@ -318,6 +322,7 @@ final class VideoPlayerManager: ObservableObject {
         ingressOpen = true
         isPlaying = true
         playbackState = .playing
+        armTimeline()
         if ingressOpen && isPlaying { startFrameProcessing() }
     }
     
@@ -328,6 +333,9 @@ final class VideoPlayerManager: ObservableObject {
     }
 
     private func closePlayback() {
+        timelineID = nil
+        retireEvents?()
+        retireEvents = nil
         ingressOpen = false
         frameRun = UUID()
         ballDetectionManager?.resetTrackingState()
@@ -353,6 +361,8 @@ final class VideoPlayerManager: ObservableObject {
     func seek(to time: Double) {
         guard hasLoadedItem, time.isFinite, duration.isFinite, duration > 0 else { return }
         let target = min(max(time, 0), duration)
+        let cmTime = CMTime(seconds: target, preferredTimescale: 600)
+        guard cmTime.isValid, cmTime.isNumeric, CMTimeGetSeconds(cmTime).isFinite else { return }
         let request = UUID(), load = loadID
         // Replace identity before cancellation can synchronously report old failure.
         seekID = request
@@ -375,7 +385,6 @@ final class VideoPlayerManager: ObservableObject {
             if self.playRequested && self.contextActive { self.beginPlayback() }
           }
         }
-        let cmTime = CMTime(seconds: target, preferredTimescale: 600)
         if let dependencies { dependencies.seek(cmTime, completion) }
         else { player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: completion) }
     }
@@ -383,6 +392,75 @@ final class VideoPlayerManager: ObservableObject {
     func resetToBeginning() {
         seek(to: 0)
     }
+
+    func replay() {
+      guard contextActive, hasLoadedItem else { return }
+      playRequested = true
+      seek(to: 0)
+    }
+
+    private func armTimeline() {
+      let timeline = UUID(), load = loadID
+      timelineID = timeline
+      let callback: (ItemEvent) -> Void = { [weak self] _ in
+        // Capture the registration's immutable owner BEFORE the executor hop.
+        // Native notifications have no run token, so even a matching owner is
+        // only a reconciliation signal, never proof of current end/failure.
+        self?.deliverState { [weak self] in self?.reconcileTimeline(load: load, timeline: timeline) }
+      }
+      let retire: () -> Void
+      if let dependencies {
+        retire = dependencies.observeEvents?(callback) ?? {}
+      } else if let item = playerItem, let player {
+        let center = NotificationCenter.default
+        let end = center.addObserver(forName: AVPlayerItem.didPlayToEndTimeNotification,
+          object: item, queue: nil) { _ in callback(.ended) }
+        let failure = center.addObserver(forName: AVPlayerItem.failedToPlayToEndTimeNotification,
+          object: item, queue: nil) { _ in callback(.failed) }
+        let itemStatus = item.observe(\.status, options: [.new]) { _, _ in callback(.failed) }
+        let playerStatus = player.observe(\.status, options: [.new]) { _, _ in callback(.failed) }
+        retire = {
+          center.removeObserver(end); center.removeObserver(failure)
+          itemStatus.invalidate(); playerStatus.invalidate()
+        }
+      } else { retire = {} }
+      guard timelineID == timeline, loadID == load else { retire(); return }
+      retireEvents = retire
+      // Cover an end/failure that became observable while installing the owner.
+      reconcileTimeline(load: load, timeline: timeline)
+    }
+
+    private func reconcileTimeline(load: UUID, timeline: UUID) {
+      guard loadID == load, timelineID == timeline, seekID == nil,
+            contextActive, playRequested, isPlaying else { return }
+      let snapshot: PlaybackSnapshot
+      if let read = dependencies?.snapshot { snapshot = read() }
+      else if dependencies != nil { return }
+      else {
+        guard let player, let item = playerItem, player.currentItem === item else { return }
+        snapshot = .init(position: player.currentTime(), stopped: player.rate == 0,
+          failed: item.status == .failed || player.status == .failed)
+      }
+      // An injected/reentrant reader can change ownership too.
+      guard loadID == load, timelineID == timeline, seekID == nil,
+            contextActive, playRequested, isPlaying else { return }
+      if snapshot.failed {
+        let retryPosition = finitePosition() ?? currentTime
+        playRequested = false
+        closePlayback()
+        failedSeekTarget = retryPosition
+        playbackState = .failed("Playback failed. Tap Play to retry.")
+      } else if snapshot.stopped, snapshot.position.isValid, snapshot.position.isNumeric,
+                CMTimeGetSeconds(snapshot.position).isFinite, duration.isFinite, duration > 0,
+                CMTimeCompare(snapshot.position, CMTime(seconds: duration, preferredTimescale: 600)) >= 0 {
+        playRequested = false
+        closePlayback()
+        currentTime = duration
+        playbackState = .ended
+      }
+    }
+
+    func shutdown() { cleanup() }
     
     func getPlayerItem() -> AVPlayerItem? {
         return playerItem
@@ -448,6 +526,7 @@ final class VideoPlayerManager: ObservableObject {
         isPlaying = false
         currentTime = 0
         duration = 0
+        isLoading = false
         hasLoadedItem = false
         playbackState = .empty
     }
