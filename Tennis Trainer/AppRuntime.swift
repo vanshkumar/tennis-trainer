@@ -13,7 +13,8 @@ enum AppRuntime {
             arguments.indices.contains(index + 1) else { return nil }
       let name = arguments[index + 1]
       return ["permission-undetermined", "permission-denied-return", "permission-restricted",
-              "capture-startup", "capture-recovery", "capture-failure", "playback-seek", "playback-end"]
+              "capture-startup", "capture-recovery", "capture-failure", "playback-seek", "playback-end",
+              "playback-import", "playback-import-empty", "playback-overlay"]
         .contains(name) ? name : nil
       #else
       return nil
@@ -89,11 +90,52 @@ enum AppRuntime {
           }, currentTime: { effects.position },
           observeEvents: { callback in effects.event = callback; return { effects.event = nil } },
           snapshot: { .init(position: effects.position, stopped: effects.stopped, failed: false) }))
-        manager.loadVideo(from: URL(fileURLWithPath: "/scripted-playback.mov"))
+        if scenario != "playback-import-empty" {
+          manager.loadVideo(from: URL(fileURLWithPath: "/scripted-playback.mov"))
+        }
         return manager
       }
       #endif
       return VideoPlayerManager()
+    }
+
+    #if DEBUG
+    static func deliverImport(_ importer: VideoImportManager, request: UUID, result: String) {
+      if result == "cancel" { importer.receiveSelection(request: request, provider: nil); return }
+      importer.receiveSelection(request: request) { callback in
+        let progress = Progress(totalUnitCount: 1)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+          if result == "failure" { callback(nil, NSError(domain: "InjectedImport", code: 1)); return }
+          let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+          defer { try? FileManager.default.removeItem(at: url) }
+          do {
+            try Data([0, 1, 2]).write(to: url)
+            callback(url, nil)
+          } catch { callback(nil, error) }
+        }
+        return progress
+      }
+    }
+    #endif
+
+    static var overlayFactory: ((PoseDetectionManager) -> BallDetectionManager)? {
+      #if DEBUG
+      if practiceUIScenario == "playback-overlay" {
+        return { pose in
+          BallDetectionManager(dependencies: .init(analyze: { _, _, _ in .init(samples: nil, position: nil) },
+            publishPose: { [weak pose] in pose?.publish($0) }, worker: { $0() }, publication: { $0() }))
+        }
+      }
+      #endif
+      return nil
+    }
+
+    static func seedOverlay(_ ball: BallDetectionManager?, pose: PoseDetectionManager) {
+      #if DEBUG
+      guard practiceUIScenario == "playback-overlay" else { return }
+      ball?.ballPosition = CGPoint(x: 0.5, y: 0.5)
+      pose.detectedPose = [.rightWrist: .init(location: CGPoint(x: 0.4, y: 0.4), confidence: 1)]
+      #endif
     }
 
     #if DEBUG
@@ -115,7 +157,7 @@ enum AppRuntime {
         switch scenario {
         case "permission-denied-return": authorization = .denied
         case "permission-restricted": authorization = .restricted
-        case "capture-startup", "capture-recovery", "capture-failure": authorization = .authorized
+        case "capture-startup", "capture-recovery", "capture-failure", "playback-overlay": authorization = .authorized
         default: authorization = .notDetermined
         }
       }

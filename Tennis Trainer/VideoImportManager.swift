@@ -31,6 +31,7 @@ final class VideoImportManager: ObservableObject {
   @Published private(set) var isImporting = false
   private var request: UUID?
   private var progress: Progress?
+  private var awaitingSelection = false
   private var completion: ((UUID, Outcome) -> Void)?
   private let effects: Effects
   init(effects: Effects = .init()) { self.effects = effects }
@@ -39,10 +40,12 @@ final class VideoImportManager: ObservableObject {
     cancel()
     self.request = request
     self.completion = completion
+    awaitingSelection = true
     isImporting = true
   }
   func receiveSelection(request: UUID, provider: Provider?) {
     guard self.request == request else { return }
+    awaitingSelection = false
     guard let provider else { finish(request, .cancelled); return }
     let effects = effects
     let pending = provider { [weak self] source, error in
@@ -56,7 +59,11 @@ final class VideoImportManager: ObservableObject {
           try effects.copy(source, destination)
           outcome = .selected(.owned(destination, remove: effects.remove))
         } catch {
-          effects.remove(destination)
+          let failure = error as NSError
+          // Even an improbable UUID collision never grants deletion authority.
+          if failure.domain != NSCocoaErrorDomain || failure.code != NSFileWriteFileExistsError {
+            effects.remove(destination)
+          }
           outcome = .failed
         }
       } else { outcome = .failed }
@@ -67,16 +74,22 @@ final class VideoImportManager: ObservableObject {
   }
   func cancel() {
     request = nil
+    awaitingSelection = false
     completion = nil
     isImporting = false
     let retired = progress
     progress = nil
     retired?.cancel()
   }
+  func pickerDismissed(request: UUID) {
+    guard self.request == request, awaitingSelection else { return }
+    finish(request, .cancelled)
+  }
   private func finish(_ request: UUID, _ outcome: Outcome) {
     guard self.request == request else { return }
     let completion = completion
     self.request = nil
+    awaitingSelection = false
     self.completion = nil
     progress = nil
     isImporting = false

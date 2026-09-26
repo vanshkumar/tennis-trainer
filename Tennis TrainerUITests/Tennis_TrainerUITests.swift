@@ -9,6 +9,61 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
     @MainActor
+    func testVideoImportRecoveryControls() throws {
+        let app = XCUIApplication()
+        for scenario in ["playback-import", "playback-import-empty"] {
+            app.launchArguments = ["--practice-ui-scenario", scenario]
+            app.launch()
+            app.buttons["Video Playback"].tap()
+            let choose = app.buttons["playback.choose"]
+            XCTAssertTrue(choose.waitForExistence(timeout: 5))
+            choose.tap(); app.buttons["import.cancel"].tap()
+            assertLabel(app.staticTexts["playback.importMessage"], "Video selection cancelled. Choose another video.")
+            XCTAssertTrue(choose.isEnabled)
+            XCTAssertEqual(app.buttons["playback.action"].exists, scenario == "playback-import")
+            choose.tap(); app.buttons["import.failure"].tap()
+            XCTAssertTrue(app.buttons["playback.cancelImport"].waitForExistence(timeout: 3))
+            assertLabel(app.staticTexts["playback.importMessage"], "Video could not be imported. Choose another video.")
+            if scenario == "playback-import" {
+                XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
+                XCTAssertTrue(app.buttons["playback.action"].isEnabled)
+            }
+            choose.tap(); app.buttons["import.success"].tap()
+            XCTAssertTrue(app.buttons["playback.cancelImport"].waitForExistence(timeout: 3))
+            assertLabel(app.staticTexts["playback.status"], "Paused")
+            let enabled = expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: app.buttons["playback.action"])
+            wait(for: [enabled], timeout: 5)
+            app.buttons["playback.action"].tap()
+            assertLabel(app.staticTexts["playback.status"], "Playing")
+            choose.tap(); app.buttons["import.success"].tap()
+            let cancel = app.buttons["playback.cancelImport"]
+            XCTAssertTrue(cancel.waitForExistence(timeout: 3)); cancel.tap()
+            assertLabel(app.staticTexts["playback.importMessage"], "Video selection cancelled. Choose another video.")
+            XCTAssertTrue(app.buttons["playback.action"].isEnabled)
+            XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
+            app.terminate()
+        }
+    }
+
+    @MainActor
+    func testVisibleOverlayClearOnStopAndPause() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-overlay"]
+        app.launch()
+        let ball = app.descendants(matching: .any)["practice.ballOverlay"].firstMatch
+        let pose = app.descendants(matching: .any)["practice.poseOverlay"].firstMatch
+        app.buttons["camera.captureAction"].tap()
+        XCTAssertTrue(ball.waitForExistence(timeout: 5)); XCTAssertTrue(pose.exists)
+        app.buttons["camera.captureAction"].tap()
+        XCTAssertFalse(ball.exists); XCTAssertFalse(pose.exists)
+        app.buttons["Video Playback"].tap()
+        app.buttons["playback.action"].tap()
+        XCTAssertTrue(ball.waitForExistence(timeout: 5)); XCTAssertTrue(pose.exists)
+        app.buttons["playback.action"].tap()
+        XCTAssertFalse(ball.exists); XCTAssertFalse(pose.exists)
+        XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
+    }
+    @MainActor
     func testPlaybackEndAndReplayControls() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--practice-ui-scenario", "playback-end"]

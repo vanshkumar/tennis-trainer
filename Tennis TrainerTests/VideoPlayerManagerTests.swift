@@ -1,8 +1,166 @@
 import XCTest
-import AVFoundation
+@preconcurrency import AVFoundation
+import Combine
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testFrameReaderRetainsFileAcrossReentrantRetirement() {
+    var removed = 0
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in },
+      remove: { _ in removed += 1 }, state: { $0() }))
+    let player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {}))
+    player.ballDetectionManager = BallDetectionManager(dependencies: .init(
+      analyze: { _, _, _ in .init(samples: nil, position: nil) }, worker: { $0() }, publication: { $0() }))
+    let request = player.beginReplacement()
+    importer.begin(request: request) { player.acceptImport($1, request: $0) }
+    importer.receiveSelection(request: request) { callback in
+      callback(URL(fileURLWithPath: "/provider/movie.mov"), nil); return Progress()
+    }
+    player.play()
+    player.processPlaybackFrame(output: RetirementReader(check: {
+      player.shutdown()
+      XCTAssertEqual(removed, 0, "An executing output reader still owns its lease")
+    }), requestedTime: .zero, orientation: .up)
+    XCTAssertEqual(removed, 1)
+  }
+  func testHundredReplacementCyclesBalanceOwnersAndReleaseAllCopies() {
+    var copies: Set<URL> = [], removals: Set<URL> = []
+    var loops = 0, maximumLoops = 0, timeOwners = 0, maximumTimeOwners = 0, eventOwners = 0
+    var timeCallbacks: [(CMTime) -> Void] = [], eventCallbacks: [(VideoPlayerManager.ItemEvent) -> Void] = []
+    var ticks: [() -> Void] = []
+    var seeks: [(Bool) -> Void] = []
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, url in copies.insert(url) },
+      remove: { XCTAssertTrue(removals.insert($0).inserted, "Exactly one removal per owned copy") }, state: { $0() }))
+    var player: VideoPlayerManager? = VideoPlayerManager(dependencies: .init(play: { true }, pause: {},
+      startLoop: { loops += 1; maximumLoops = max(maximumLoops, loops) }, stopLoop: { loops -= 1 },
+      seek: { _, done in seeks.append(done) },
+      observeTicks: { callback in ticks.append(callback); return {} },
+      observeTime: { callback in
+        timeOwners += 1; maximumTimeOwners = max(maximumTimeOwners, timeOwners)
+        timeCallbacks.append(callback)
+        var removed = false
+        return { XCTAssertFalse(removed); removed = true; timeOwners -= 1 }
+      }, observeEvents: { callback in
+        eventOwners += 1; XCTAssertLessThanOrEqual(eventOwners, 1)
+        eventCallbacks.append(callback)
+        var removed = false
+        return { XCTAssertFalse(removed); removed = true; eventOwners -= 1 }
+      }))
+    weak var probe = player
+    for _ in 0..<100 {
+      let request = player!.beginReplacement()
+      importer.begin(request: request) { [weak player] in player?.acceptImport($1, request: $0) }
+      importer.receiveSelection(request: request) { done in
+        done(URL(fileURLWithPath: "/external/same.mov"), nil); return Progress()
+      }
+      player!.play(); player!.play(); player!.pause(); player!.play()
+      player!.seek(to: 2)
+      seeks.last?(true)
+      XCTAssertEqual(loops, 1)
+      XCTAssertEqual(timeOwners, 1)
+      // Deliver all retained old callbacks; they cannot affect the current owner.
+      timeCallbacks.forEach { $0(.zero) }; eventCallbacks.forEach { $0(.ended) }; ticks.forEach { $0() }
+      XCTAssertTrue(player!.isPlaying)
+    }
+    player!.shutdown(); player!.shutdown()
+    XCTAssertEqual(loops, 0); XCTAssertEqual(timeOwners, 0); XCTAssertEqual(eventOwners, 0)
+    XCTAssertEqual(maximumLoops, 1); XCTAssertEqual(maximumTimeOwners, 1)
+    player = nil
+    XCTAssertNil(probe, "Delayed callbacks must not retain the manager")
+    timeCallbacks.removeAll(); eventCallbacks.removeAll(); ticks.removeAll(); seeks.removeAll()
+    XCTAssertEqual(copies.count, 100)
+    XCTAssertEqual(removals, copies)
+    XCTAssertFalse(removals.contains(URL(fileURLWithPath: "/external/same.mov")))
+  }
+
+  @MainActor
+  func testGeneratedMovieReadinessSeekEndReplayAndRetirement() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).appendingPathExtension("mov")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try await writeMovie(to: url)
+    var manager: VideoPlayerManager? = VideoPlayerManager()
+    weak var probe = manager
+    let loaded = expectation(description: "real ready paused item")
+    var observation: AnyCancellable? = manager!.$playbackState.filter { $0 == .paused }.prefix(1).sink { _ in loaded.fulfill() }
+    manager!.loadVideo(from: url)
+    await fulfillment(of: [loaded], timeout: 10)
+    observation = nil
+    XCTAssertEqual(manager!.duration, 1, accuracy: 0.05)
+    let item = try XCTUnwrap(manager!.getPlayerItem())
+    let layer = try XCTUnwrap(manager!.getPlayerLayer())
+    XCTAssertEqual(item.status, .readyToPlay)
+    XCTAssertEqual(item.outputs.count, 1)
+    let sought = expectation(description: "real seek completion")
+    observation = manager!.$playbackState.dropFirst().filter { $0 == .paused }.prefix(1).sink { _ in sought.fulfill() }
+    manager!.seek(to: 0.5)
+    await fulfillment(of: [sought], timeout: 5)
+    observation = nil
+    XCTAssertEqual(manager!.currentTime, 0.5, accuracy: 0.05)
+    let ended = expectation(description: "real end notification")
+    observation = manager!.$playbackState.filter { $0 == .ended }.prefix(1).sink { _ in ended.fulfill() }
+    manager!.play()
+    await fulfillment(of: [ended], timeout: 5)
+    observation = nil
+    XCTAssertFalse(manager!.isPlaying)
+    let replayed = expectation(description: "real replay zero seek")
+    observation = manager!.$playbackState.filter { $0 == .playing }.prefix(1).sink { _ in replayed.fulfill() }
+    manager!.replay()
+    await fulfillment(of: [replayed], timeout: 5)
+    observation = nil
+    XCTAssertLessThan(manager!.currentTime, 0.1)
+    manager!.shutdown(); manager!.shutdown()
+    XCTAssertNil(layer.player)
+    XCTAssertTrue(item.outputs.isEmpty)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "External original survives retirement")
+    manager = nil
+    XCTAssertNil(probe)
+    withExtendedLifetime(observation) {}
+  }
+
+  private func writeMovie(to url: URL) async throws {
+    let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+      AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64
+    ])
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input,
+      sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                                   kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64])
+    writer.add(input)
+    XCTAssertTrue(writer.startWriting())
+    writer.startSession(atSourceTime: .zero)
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+      var index: Int64 = 0
+      var finished = false
+      input.requestMediaDataWhenReady(on: DispatchQueue(label: "test.synthetic-movie")) {
+        guard !finished else { return }
+        while input.isReadyForMoreMediaData && index < 30 {
+          var buffer: CVPixelBuffer?
+          let result = CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &buffer)
+          guard result == kCVReturnSuccess, let buffer else {
+            finished = true; writer.cancelWriting()
+            continuation.resume(throwing: NSError(domain: "SyntheticMovieBuffer", code: Int(result))); return
+          }
+          CVPixelBufferLockBaseAddress(buffer, [])
+          memset(CVPixelBufferGetBaseAddress(buffer), Int32(index * 7), CVPixelBufferGetDataSize(buffer))
+          CVPixelBufferUnlockBaseAddress(buffer, [])
+          guard adaptor.append(buffer, withPresentationTime: CMTime(value: index, timescale: 30)) else {
+            finished = true; writer.cancelWriting()
+            continuation.resume(throwing: writer.error ?? NSError(domain: "SyntheticMovieWrite", code: 1)); return
+          }
+          index += 1
+        }
+        if index == 30 {
+          finished = true
+          input.markAsFinished()
+          writer.endSession(atSourceTime: CMTime(value: 1, timescale: 1))
+          writer.finishWriting {
+            if writer.status == .completed { continuation.resume() }
+            else { continuation.resume(throwing: writer.error ?? NSError(domain: "SyntheticMovieFinish", code: 1)) }
+          }
+        }
+      }
+    }
+  }
   func testRetiredSessionFileSurvivesPendingSeekConsumer() {
     var removed: [URL] = []
     var completion: ((Bool) -> Void)?
@@ -385,6 +543,12 @@ final class VideoPlayerManagerTests: XCTestCase {
     XCTAssertEqual(f.maximumLoops, 1)
     XCTAssertEqual(f.retiredTicks, 21)
   }
+}
+
+private struct RetirementReader: VideoPlayerManager.FrameOutputReading {
+  let check: () -> Void
+  func hasNewPixelBuffer(forItemTime time: CMTime) -> Bool { check(); return false }
+  func copyFrame(forItemTime time: CMTime) -> (CVPixelBuffer, CMTime)? { nil }
 }
 
 final class CandidateEffects {

@@ -51,6 +51,29 @@ final class VideoPlayerManager: ObservableObject {
       }
       deinit { retire() }
     }
+    private final class PlaybackSession {
+      var media: VideoImportManager.MediaHandle?
+      var player: AVPlayer?
+      var item: AVPlayerItem?
+      var output: AVPlayerItemVideoOutput?
+      var layer: AVPlayerLayer?
+      var timeObservation: (player: AVPlayer, token: Any)?
+      func retire() {
+        player?.pause()
+        item?.cancelPendingSeeks()
+        if let observation = timeObservation {
+          timeObservation = nil
+          observation.player.removeTimeObserver(observation.token)
+        }
+        if let output, let item { item.remove(output) }
+        output = nil
+        layer?.player = nil; layer = nil
+        player?.replaceCurrentItem(with: nil)
+        player = nil; item = nil
+        media = nil
+      }
+      deinit { retire() }
+    }
     enum ItemEvent { case ended, failed }
     struct PlaybackSnapshot {
       var position: CMTime
@@ -76,7 +99,11 @@ final class VideoPlayerManager: ObservableObject {
     private var seekID: UUID?
     private var failedSeekTarget: Double?
     private var hasLoadedItem = false
-    private var media: VideoImportManager.MediaHandle?
+    private var session = PlaybackSession()
+    private var media: VideoImportManager.MediaHandle? {
+      get { session.media }
+      set { session.media = newValue }
+    }
     private var replacementID: UUID?
     private var candidate: Candidate?
     private var orientation: CGImagePropertyOrientation = .up
@@ -128,11 +155,22 @@ final class VideoPlayerManager: ObservableObject {
     @Published var duration: Double = 0
     @Published var isLoading = false
     
-    private var player: AVPlayer?
-    private var playerItem: AVPlayerItem?
-    private var timeObserver: Any?
-    private var playerLayer: AVPlayerLayer?
-    private var videoOutput: AVPlayerItemVideoOutput?
+    private var player: AVPlayer? {
+      get { session.player }
+      set { session.player = newValue }
+    }
+    private var playerItem: AVPlayerItem? {
+      get { session.item }
+      set { session.item = newValue }
+    }
+    private var playerLayer: AVPlayerLayer? {
+      get { session.layer }
+      set { session.layer = newValue }
+    }
+    private var videoOutput: AVPlayerItemVideoOutput? {
+      get { session.output }
+      set { session.output = newValue }
+    }
     private var displayLink: CADisplayLink?
     
     // Pose detection components
@@ -159,6 +197,7 @@ final class VideoPlayerManager: ObservableObject {
     }
 
     func cancelReplacement() {
+        guard replacementID != nil else { return }
         retireCandidate()
         isLoading = false
         importMessage = "Video selection cancelled. Choose another video."
@@ -249,11 +288,12 @@ final class VideoPlayerManager: ObservableObject {
       player.isMuted = true
       pending.item = item; pending.player = player
       let handle = pending.media.lease()
-      pending.status = item.observe(\.status, options: [.initial, .new]) { [weak self, weak pending, handle] item, _ in
-        let status: Readiness = item.status == .readyToPlay ? .ready : (item.status == .failed ? .failed : .unknown)
+      pending.status = item.observe(\.status, options: [.initial, .new]) { [weak self, weak pending, handle] _, _ in
         self?.deliverState { [weak self, weak pending, handle] in
           defer { withExtendedLifetime(handle) {} }
-          guard let self, let pending else { return }
+          guard let self, let pending, self.isCurrent(pending), let item = pending.item else { return }
+          // A queued observation signals reconciliation, not historical readiness.
+          let status: Readiness = item.status == .readyToPlay ? .ready : (item.status == .failed ? .failed : .unknown)
           self.receiveReadiness(status, for: pending)
         }
       }
@@ -291,6 +331,10 @@ final class VideoPlayerManager: ObservableObject {
 
     private func commitIfReady(_ pending: Candidate) {
       guard isCurrent(pending), pending.ready, let metadata = pending.metadata else { return }
+      if let item = pending.item, item.status != .readyToPlay {
+        if item.status == .failed { failCandidate(pending) }
+        return
+      }
       // Detach from candidate cancellation before retiring the previous session.
       candidate = nil; replacementID = nil
       pending.status?.invalidate(); pending.status = nil
@@ -366,6 +410,8 @@ final class VideoPlayerManager: ObservableObject {
     func processCurrentFrame(output: FrameOutputReading, requestedTime: CMTime,
                              orientation: CGImagePropertyOrientation,
                              requiresActiveContext: Bool = false) {
+        let lease = media?.lease()
+        defer { withExtendedLifetime(lease) {} }
         guard !requiresActiveContext || (contextActive && ingressOpen && isPlaying),
               let manager = ballDetectionManager else { return }
         let generation = manager.admissionGeneration
@@ -398,9 +444,12 @@ final class VideoPlayerManager: ObservableObject {
 
     private func setupTimeObserver() {
         let load = loadID
-        let accept: (CMTime) -> Void = { [weak self] _ in
+        let lease = media?.lease()
+        let accept: (CMTime) -> Void = { [weak self, lease] _ in
+          defer { withExtendedLifetime(lease) {} }
           guard let self else { return }
-          self.deliverState { [weak self] in
+          self.deliverState { [weak self, lease] in
+            defer { withExtendedLifetime(lease) {} }
             guard let self, self.loadID == load, self.seekID == nil else { return }
             // A delayed periodic callback is only a signal; read the owned backend now.
             if let seconds = self.finitePosition() { self.currentTime = seconds }
@@ -411,7 +460,9 @@ final class VideoPlayerManager: ObservableObject {
           return
         }
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: accept)
+        if let player {
+          session.timeObservation = (player, player.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: accept))
+        }
     }
 
     private func deliverState(_ job: @escaping () -> Void) {
@@ -501,8 +552,11 @@ final class VideoPlayerManager: ObservableObject {
         closePlayback()
         playbackState = .seeking
         if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
-        let completion: (Bool) -> Void = { [weak self] success in
-          self?.deliverState { [weak self] in
+        let lease = media?.lease()
+        let completion: (Bool) -> Void = { [weak self, lease] success in
+          defer { withExtendedLifetime(lease) {} }
+          self?.deliverState { [weak self, lease] in
+            defer { withExtendedLifetime(lease) {} }
             guard let self, self.loadID == load, self.seekID == request else { return }
             self.seekID = nil
             guard success, let position = self.finitePosition() else {
@@ -533,11 +587,15 @@ final class VideoPlayerManager: ObservableObject {
     private func armTimeline() {
       let timeline = UUID(), load = loadID
       timelineID = timeline
-      let callback: (ItemEvent) -> Void = { [weak self] _ in
+      let lease = media?.lease()
+      let callback: (ItemEvent) -> Void = { [weak self, lease] _ in
         // Capture the registration's immutable owner BEFORE the executor hop.
         // Native notifications have no run token, so even a matching owner is
         // only a reconciliation signal, never proof of current end/failure.
-        self?.deliverState { [weak self] in self?.reconcileTimeline(load: load, timeline: timeline) }
+        self?.deliverState { [weak self, lease] in
+          defer { withExtendedLifetime(lease) {} }
+          self?.reconcileTimeline(load: load, timeline: timeline)
+        }
       }
       let retire: () -> Void
       if let dependencies {
@@ -636,26 +694,8 @@ final class VideoPlayerManager: ObservableObject {
         if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
         retireTime?()
         retireTime = nil
-        if let timeObserver = timeObserver {
-            player?.removeTimeObserver(timeObserver)
-            self.timeObserver = nil
-        }
-        
-        // Clean up video output
-        if let videoOutput = videoOutput, let playerItem = playerItem {
-            playerItem.remove(videoOutput)
-        }
-        videoOutput = nil
-        
-        // Disconnect layer from player
-        if let layer = playerLayer {
-            layer.player = nil
-            playerLayer = nil
-        }
-        
-        player = nil
-        playerItem = nil
-        media = nil
+        session.retire()
+        session = PlaybackSession()
         isPlaying = false
         currentTime = 0
         duration = 0

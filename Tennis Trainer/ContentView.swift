@@ -56,9 +56,9 @@ struct ContentView: View {
         }
         .onAppear {
             cameraManager.poseDetectionManager = cameraPoseManager
-            cameraManager.setupBallDetection(with: cameraPoseManager)
+            cameraManager.setupBallDetection(with: cameraPoseManager, factory: AppRuntime.overlayFactory)
             videoPlayerManager.poseDetectionManager = playbackPoseManager
-            videoPlayerManager.setupBallDetection(with: playbackPoseManager)
+            videoPlayerManager.setupBallDetection(with: playbackPoseManager, factory: AppRuntime.overlayFactory)
             updateActiveContexts()
             
             cameraManager.onFrameProcessed = {
@@ -97,13 +97,36 @@ struct ContentView: View {
             }
         }
         .onChange(of: scenePhase) { _, _ in updateActiveContexts() }
+        .onChange(of: cameraManager.isRecording) { _, active in
+            if active { AppRuntime.seedOverlay(cameraManager.ballDetectionManager, pose: cameraPoseManager) }
+        }
+        .onChange(of: videoPlayerManager.isPlaying) { _, active in
+            if active { AppRuntime.seedOverlay(videoPlayerManager.ballDetectionManager, pose: playbackPoseManager) }
+        }
         .onDisappear {
             cameraManager.setContextActive(false)
             videoImporter.cancel()
             videoPlayerManager.shutdown()
         }
-        .sheet(isPresented: $showingVideoPicker) {
+        .sheet(isPresented: $showingVideoPicker, onDismiss: {
+            videoImporter.pickerDismissed(request: importRequest)
+        }) {
+            #if DEBUG
+            if AppRuntime.practiceUIScenario?.hasPrefix("playback-import") == true {
+                VStack {
+                    ForEach(["cancel", "failure", "success"], id: \.self) { result in
+                        Button(result) {
+                            AppRuntime.deliverImport(videoImporter, request: importRequest, result: result)
+                            showingVideoPicker = false
+                        }.accessibilityIdentifier("import." + result)
+                    }
+                }
+            } else {
+                VideoPickerView(request: importRequest, importer: videoImporter)
+            }
+            #else
             VideoPickerView(request: importRequest, importer: videoImporter)
+            #endif
         }
     }
     
@@ -129,6 +152,9 @@ struct ContentView: View {
                                 Circle()
                                     .fill(jointColor(for: jointName))
                                     .frame(width: 6, height: 6)
+                                    .accessibilityElement()
+                                    .accessibilityLabel("Pose overlay")
+                                    .accessibilityIdentifier("practice.poseOverlay")
                                     .position(
                                         x: point.location.x * geometry.size.width,
                                         y: (1 - point.location.y) * geometry.size.height // Flip Y for UIKit
@@ -260,6 +286,9 @@ struct ContentView: View {
                                     Circle()
                                         .fill(jointColor(for: jointName))
                                         .frame(width: 6, height: 6)
+                                        .accessibilityElement()
+                                        .accessibilityLabel("Pose overlay")
+                                        .accessibilityIdentifier("practice.poseOverlay")
                                         .position(
                                             x: point.location.x * geometry.size.width,
                                             y: (1 - point.location.y) * geometry.size.height
@@ -460,6 +489,9 @@ private struct BallOverlayView: View {
       Circle()
         .stroke(Color.yellow, lineWidth: 2)
         .frame(width: 14, height: 14)
+        .accessibilityElement()
+        .accessibilityLabel("Ball overlay")
+        .accessibilityIdentifier("practice.ballOverlay")
         .position(x: pos.x * size.width, y: (1 - pos.y) * size.height)
     }
   }

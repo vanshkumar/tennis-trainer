@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Imported media consumer lifetimes**
+- Observation: The retirement regression deleted an imported file during shutdown while a seek completion still retained its AV consumer. Cancelling metadata work similarly does not prove that the suspended asset reader has finished.
+- Action: Retain the explicit media handle through metadata, readiness, seek, event, time and executing frame-reader callbacks; release session ownership only after original-owner AV teardown. Keep provider copying synchronous and distinguish pre-selection dismissal from dismissal while a selected provider is pending.
+- Confidence: high
+
 **2026-09-26 — Playback effect fixture teardown**
 - Observation: VideoPlayerManager calls injected pause/loop removal during deinit. The new PlayerEffects fixture crashed after its first test when those callbacks captured an already-deallocated fixture with unowned self; weak captures preserved teardown and the complete suite passed.
 - Action: Keep playback effect teardown captures weak, and retain old tick/event closures in a manager-deallocation test to verify they neither retain nor revive the manager.

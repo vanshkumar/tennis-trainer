@@ -3,6 +3,55 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoImportManagerTests: XCTestCase {
+  func testPickerDismissalCancelsOnlyBeforeASelection() {
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in }, remove: { _ in }, state: { $0() }))
+    var cancellations = 0, selections = 0
+    let empty = UUID()
+    importer.begin(request: empty) { _, result in if case .cancelled = result { cancellations += 1 } }
+    importer.pickerDismissed(request: empty)
+    XCTAssertEqual(cancellations, 1)
+    let selected = UUID()
+    var provider: ((URL?, Error?) -> Void)?
+    importer.begin(request: selected) { _, result in if case .selected = result { selections += 1 } }
+    importer.receiveSelection(request: selected) { provider = $0; return Progress() }
+    importer.pickerDismissed(request: selected)
+    XCTAssertTrue(importer.isImporting)
+    provider?(URL(fileURLWithPath: "/provider/movie.mov"), nil)
+    XCTAssertEqual(selections, 1)
+    XCTAssertEqual(cancellations, 1)
+  }
+  func testDestinationCollisionFailureNeverRemovesExistingFile() {
+    var removals = 0
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in
+      throw CocoaError(.fileWriteFileExists)
+    }, remove: { _ in removals += 1 }, state: { $0() }))
+    let request = UUID()
+    importer.begin(request: request) { _, _ in }
+    importer.receiveSelection(request: request) { callback in
+      callback(URL(fileURLWithPath: "/provider/movie.mov"), nil); return Progress()
+    }
+    XCTAssertEqual(removals, 0)
+  }
+  func testActualCopiesPreserveExternalAndUnknownLegacyFiles() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let original = root.appendingPathComponent("original.mov")
+    let legacy = root.appendingPathComponent("legacy.mov")
+    try Data([1, 2, 3]).write(to: original)
+    try Data([4, 5]).write(to: legacy)
+    let importer = VideoImportManager(effects: .init(directory: root.appendingPathComponent("owned"), state: { $0() }))
+    var handle: VideoImportManager.MediaHandle?
+    let request = UUID()
+    importer.begin(request: request) { _, result in if case .selected(let media) = result { handle = media } }
+    importer.receiveSelection(request: request) { callback in callback(original, nil); return Progress() }
+    let copied = try XCTUnwrap(handle?.url)
+    XCTAssertEqual(try Data(contentsOf: copied), Data([1, 2, 3]))
+    handle = nil
+    XCTAssertFalse(FileManager.default.fileExists(atPath: copied.path))
+    XCTAssertEqual(try Data(contentsOf: original), Data([1, 2, 3]))
+    XCTAssertEqual(try Data(contentsOf: legacy), Data([4, 5]))
+  }
   func testCancelledMetadataConsumerKeepsLeaseUntilActualCompletion() {
     var removed: [URL] = []
     let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in },
