@@ -54,6 +54,14 @@ final class CameraManager: NSObject, ObservableObject {
       case missingCamera, inputUnavailable, outputUnavailable
     }
 
+    // Allocate before publishing the manager to either the preview or session
+    // executor. Immutable references give configuration, preview and teardown
+    // one owner without locking around blocking AVFoundation operations.
+    final class CaptureBackend {
+      let session = AVCaptureSession()
+      let output = AVCaptureVideoDataOutput()
+    }
+
     struct Dependencies {
       var session: (@escaping () -> Void) -> Void
       var drain: (@escaping () -> Void) -> Void
@@ -80,15 +88,7 @@ final class CameraManager: NSObject, ObservableObject {
     private var sessionConfigured = false
     private var removeSessionObservers: (() -> Void)?
     private var recoveryAttempts = 0
-    // Only the session executor writes configuration/observer ownership.
-    private var ownedSession: AVCaptureSession?
-    
-    private lazy var captureSession: AVCaptureSession = {
-      let session = AVCaptureSession()
-      ownedSession = session
-      return session
-    }()
-    private lazy var videoOutput = AVCaptureVideoDataOutput()
+    private let backend: CaptureBackend?
     // Keep session lifecycle work responsive even when frame analysis is expensive.
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private let videoProcessingQueue = DispatchQueue(label: "camera.video.processing.queue", qos: .userInitiated)
@@ -109,7 +109,10 @@ final class CameraManager: NSObject, ObservableObject {
         self.init(dependencies: nil)
     }
 
-    init(dependencies: Dependencies?) {
+    init(dependencies: Dependencies?, backend: CaptureBackend? = nil) {
+        // Injected managers omit all camera resources unless a test explicitly
+        // supplies an inert backend to inspect preview/session ownership.
+        self.backend = backend ?? (dependencies == nil && !AppRuntime.isRunningTests ? CaptureBackend() : nil)
         super.init()
         if let dependencies {
           self.dependencies = dependencies
@@ -122,16 +125,17 @@ final class CameraManager: NSObject, ObservableObject {
             drain: { [weak self] in self?.videoProcessingQueue.async(execute: $0) },
             state: { DispatchQueue.main.async(execute: $0) },
             stop: { [weak self] in
-              guard let self else { return }
-              if self.captureSession.isRunning { self.captureSession.stopRunning() }
+              guard let session = self?.backend?.session else { return }
+              if session.isRunning { session.stopRunning() }
             }, attach: { [weak self] attached in
-              guard let self else { return }
-              self.videoOutput.setSampleBufferDelegate(attached ? self : nil,
+              guard let self, let output = self.backend?.output else { return }
+              output.setSampleBufferDelegate(attached ? self : nil,
                 queue: attached ? self.videoProcessingQueue : nil)
             }, start: { [weak self] in
-              guard let self, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return false }
-              if !self.captureSession.isRunning { self.captureSession.startRunning() }
-              return self.captureSession.isRunning
+              guard let session = self?.backend?.session,
+                    AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return false }
+              if !session.isRunning { session.startRunning() }
+              return session.isRunning
             }, authorization: { AVCaptureDevice.authorizationStatus(for: .video) },
             requestAuthorization: { AVCaptureDevice.requestAccess(for: .video, completionHandler: $0) },
             openSettings: {
@@ -139,8 +143,8 @@ final class CameraManager: NSObject, ObservableObject {
               UIApplication.shared.open(url)
             }, configure: { [weak self] in try self?.configureSession() },
             snapshot: { [weak self] in
-              .init(running: self?.captureSession.isRunning ?? false,
-                interrupted: self?.captureSession.isInterrupted ?? false)
+              .init(running: self?.backend?.session.isRunning ?? false,
+                interrupted: self?.backend?.session.isInterrupted ?? false)
             }, observe: { [weak self] callback in
               self?.observeSession(callback) ?? {}
             })
@@ -151,11 +155,10 @@ final class CameraManager: NSObject, ObservableObject {
     deinit {
       removeSessionObservers?()
       ballDetectionManager?.resetTrackingState()
-      if let session = ownedSession {
-        let output = videoOutput
+      if let backend {
         sessionQueue.async {
-          output.setSampleBufferDelegate(nil, queue: nil)
-          if session.isRunning { session.stopRunning() }
+          backend.output.setSampleBufferDelegate(nil, queue: nil)
+          if backend.session.isRunning { backend.session.stopRunning() }
         }
       }
     }
@@ -202,6 +205,9 @@ final class CameraManager: NSObject, ObservableObject {
     }
     
     private func configureSession() throws {
+        guard let backend else { throw ConfigurationError.missingCamera }
+        let captureSession = backend.session
+        let videoOutput = backend.output
         captureSession.beginConfiguration()
         defer { captureSession.commitConfiguration() }
         
@@ -221,7 +227,7 @@ final class CameraManager: NSObject, ObservableObject {
             throw ConfigurationError.inputUnavailable
         }
         
-        configureVideoOutput()
+        configureVideoOutput(videoOutput)
         configure120FPS(for: videoDevice)
         
         if captureSession.canAddOutput(videoOutput) {
@@ -232,7 +238,7 @@ final class CameraManager: NSObject, ObservableObject {
         }
     }
     
-    private func configureVideoOutput() {
+    private func configureVideoOutput(_ videoOutput: AVCaptureVideoDataOutput) {
         videoOutput.videoSettings = [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
@@ -434,6 +440,7 @@ final class CameraManager: NSObject, ObservableObject {
     }
 
     private func observeSession(_ callback: @escaping (SessionEvent) -> Void) -> () -> Void {
+      guard let captureSession = backend?.session else { return {} }
       let center = NotificationCenter.default
       let events: [(Notification.Name, SessionEvent)] = [
         (AVCaptureSession.didStartRunningNotification, .started),
@@ -466,7 +473,9 @@ final class CameraManager: NSObject, ObservableObject {
     
     func getPreviewLayer() -> AVCaptureVideoPreviewLayer {
         if previewLayer == nil {
-            previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
+            let layer = AVCaptureVideoPreviewLayer()
+            layer.session = backend?.session
+            previewLayer = layer
             previewLayer?.videoGravity = .resizeAspectFill
         }
         return previewLayer!

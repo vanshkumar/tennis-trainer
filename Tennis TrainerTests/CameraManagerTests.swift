@@ -3,6 +3,45 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class CameraManagerTests: XCTestCase {
+  func testInjectedAndDefaultTestManagersNeverAllocateCaptureForPreviewOrStop() {
+    let injected = CameraManager(dependencies: .init(session: { $0() }, drain: { $0() }, state: { $0() },
+      stop: {}, attach: { _ in }, start: { false }, authorization: { .denied }))
+    for camera in [injected, CameraManager()] {
+      XCTAssertNil(camera.getPreviewLayer().session)
+      camera.stopCapture()
+      camera.setContextActive(false)
+      XCTAssertNil(camera.getPreviewLayer().session, "Preview access must not allocate a real backend for injected tests")
+    }
+  }
+
+  func testInitializedBackendKeepsPreviewAndQueuedLifecycleOnOneSession() {
+    let backend = CameraManager.CaptureBackend()
+    let session = backend.session
+    var jobs: [() -> Void] = []
+    var owners: [AVCaptureSession] = []
+    var status: AVAuthorizationStatus = .denied
+    let camera = CameraManager(dependencies: .init(
+      session: { jobs.append($0) }, drain: { $0() }, state: { $0() },
+      stop: { owners.append(backend.session) }, attach: { _ in },
+      start: { owners.append(backend.session); return true }, authorization: { status },
+      configure: { owners.append(backend.session) }), backend: backend)
+    XCTAssertEqual(jobs.count, 1, "Denied initialization queues Stop before any preview")
+    let preview = camera.getPreviewLayer()
+    XCTAssertTrue(preview.session === session)
+    while !jobs.isEmpty { jobs.removeFirst()() }
+    status = .authorized
+    camera.startCapture()
+    while !jobs.isEmpty { jobs.removeFirst()() }
+    camera.stopCapture()
+    while !jobs.isEmpty { jobs.removeFirst()() }
+    XCTAssertEqual(owners.count, 5, "Initial Stop, restart Stop, configure, start and final Stop")
+    XCTAssertTrue(owners.allSatisfy { $0 === session })
+    XCTAssertTrue(camera.getPreviewLayer() === preview)
+    XCTAssertTrue(preview.session === session)
+    XCTAssertTrue(session.inputs.isEmpty, "Identity test never configures physical hardware")
+    XCTAssertFalse(session.isRunning)
+  }
+
   func testConfigurationIsIdempotentAndRunningWaitsForCurrentBackendSnapshot() {
     let f = SessionFixture()
     f.camera.startCapture()
