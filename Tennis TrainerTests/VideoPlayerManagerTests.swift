@@ -4,6 +4,81 @@ import Combine
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testReplacementFailureRetiresHeldSeekAndRequiresFreshSuccessBeforePlay() {
+    for outcome in 0..<5 {
+      for oldSuccess in [false, true] {
+        let f = CandidateEffects()
+        f.load("original")
+        f.metadata[0](.success(.init(duration: 30))); f.ready[0](.ready)
+        f.player.play(); f.player.seek(to: 7)
+        XCTAssertEqual(f.player.playbackState, .seeking)
+        let request = f.player.beginReplacement()
+        XCTAssertEqual(f.player.playbackState, .paused, "Replacement retires the seeking presentation immediately")
+        switch outcome {
+        case 0: f.player.acceptImport(.cancelled, request: request)
+        case 1: f.player.acceptImport(.failed, request: request)
+        default:
+          f.player.acceptImport(.selected(.external(URL(fileURLWithPath: "/replacement.mov"))), request: request)
+          if outcome == 2 { f.metadata[1](.failure(NSError(domain: "fixture", code: 1))) }
+          else if outcome == 3 { f.ready[1](.failed) }
+          else { f.player.cancelReplacement() }
+          f.metadata[1](.success(.init(duration: 50))); f.ready[1](.ready)
+        }
+        f.seeks[0].completion(oldSuccess)
+        XCTAssertEqual(f.player.duration, 30)
+        XCTAssertEqual(f.player.currentTime, 0)
+        XCTAssertEqual(f.player.playbackState, .paused)
+        XCTAssertFalse(f.player.isLoading)
+        XCTAssertFalse(f.player.playRequested)
+        XCTAssertFalse(f.player.isPlaying)
+        XCTAssertEqual(f.activeLoops, 0)
+        f.player.play()
+        XCTAssertEqual(f.seeks.count, 2, "The unconfirmed old target still needs a fresh seek")
+        XCTAssertEqual(f.seeks[1].target, CMTime(value: 7, timescale: 1))
+        XCTAssertFalse(f.player.isPlaying)
+        XCTAssertEqual(f.activeLoops, 0)
+        f.seeks[0].completion(oldSuccess)
+        XCTAssertEqual(f.player.playbackState, .seeking)
+        f.position = f.seeks[1].target
+        f.seeks[1].completion(true)
+        f.seeks[0].completion(!oldSuccess)
+        XCTAssertEqual(f.player.currentTime, 7)
+        XCTAssertEqual(f.player.playbackState, .playing)
+        XCTAssertTrue(f.player.playRequested)
+        XCTAssertEqual(f.activeLoops, 1)
+      }
+    }
+  }
+
+  func testImportRecoveryMessageDistinguishesPreviousVideoFromEmptySelection() {
+    for initial in [false, true] {
+      for outcome in 0..<3 {
+        let f = CandidateEffects()
+        if initial {
+          f.load("original")
+          f.metadata[0](.success(.init(duration: 30))); f.ready[0](.ready)
+        }
+        let request = f.player.beginReplacement()
+        let prefix: String
+        switch outcome {
+        case 0:
+          f.player.acceptImport(.cancelled, request: request)
+          prefix = "Video selection cancelled."
+        case 1:
+          f.player.acceptImport(.failed, request: request)
+          prefix = "Video could not be imported."
+        default:
+          f.player.acceptImport(.selected(.external(URL(fileURLWithPath: "/invalid.mov"))), request: request)
+          f.ready.last?(.failed)
+          prefix = "Video could not load."
+        }
+        XCTAssertEqual(f.player.importMessage, prefix + (initial
+          ? " Your previous video is ready to play." : " Choose another video."))
+        XCTAssertEqual(f.player.playbackState, initial ? .paused : .empty)
+      }
+    }
+  }
+
   func testFrameReaderRetainsFileAcrossReentrantRetirement() {
     var removed = 0
     let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in },
@@ -557,7 +632,13 @@ final class CandidateEffects {
   var cancelled = 0
   var hold = false
   var jobs: [() -> Void] = []
-  lazy var player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {},
+  var seeks: [PlayerEffects.Seek] = []
+  var position = CMTime.zero
+  var activeLoops = 0
+  lazy var player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {},
+    startLoop: { [weak self] in self?.activeLoops += 1 }, stopLoop: { [weak self] in self?.activeLoops -= 1 },
+    seek: { [weak self] in self?.seeks.append(.init(target: $0, completion: $1)) },
+    currentTime: { [weak self] in self?.position ?? .invalid },
     state: { [weak self] job in if self?.hold == true { self?.jobs.append(job) } else { job() } },
     prepare: { [weak self] _, metadata, ready in
       self?.metadata.append(metadata); self?.ready.append(ready)

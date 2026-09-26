@@ -186,8 +186,10 @@ final class VideoPlayerManager: ObservableObject {
     @discardableResult
     func beginReplacement() -> UUID {
         retireCandidate()
-        pause()
+        // Retire the callback before pause settles the preserved item. Keep its
+        // unconfirmed target so a later Play still requires a fresh successful seek.
         seekID = nil
+        pause()
         if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
         let request = UUID()
         replacementID = request
@@ -200,7 +202,7 @@ final class VideoPlayerManager: ObservableObject {
         guard replacementID != nil else { return }
         retireCandidate()
         isLoading = false
-        importMessage = "Video selection cancelled. Choose another video."
+        importMessage = importRecoveryMessage("Video selection cancelled.")
     }
 
     func acceptImport(_ outcome: VideoImportManager.Outcome, request: UUID) {
@@ -211,7 +213,7 @@ final class VideoPlayerManager: ObservableObject {
         case .failed:
           retireCandidate()
           isLoading = false
-          importMessage = "Video could not be imported. Choose another video."
+          importMessage = importRecoveryMessage("Video could not be imported.")
         }
     }
 
@@ -319,7 +321,11 @@ final class VideoPlayerManager: ObservableObject {
       guard isCurrent(pending) else { return }
       retireCandidate()
       isLoading = false
-      importMessage = "Video could not load. Choose another video."
+      importMessage = importRecoveryMessage("Video could not load.")
+    }
+
+    private func importRecoveryMessage(_ reason: String) -> String {
+      reason + (hasLoadedItem ? " Your previous video is ready to play." : " Choose another video.")
     }
 
     private func retireCandidate() {
