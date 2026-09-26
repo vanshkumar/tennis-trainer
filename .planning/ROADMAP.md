@@ -65,7 +65,7 @@ Planning notes:
 4. Rapid clip replacement, cancellation, and failed loads leave the current selection usable; late metadata, seek, notification, and detection completions from old items cannot change its state.
 5. Repeated play/pause/replacement cycles maintain only the intended active processing loop and release retired outputs, observers, display links, and app-owned video copies without deleting original or externally owned media.
 
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 **Wave 1**
 
 - [x] 02-01-PLAN.md — Stop/Pause/mode lifecycle, fresh ingress and current-mode feedback
@@ -76,7 +76,7 @@ Planning notes:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-03-PLAN.md — Latest seek, end and Replay with current-timeline events
+- [x] 02-03-PLAN.md — Latest seek, end and Replay with current-timeline events
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -154,7 +154,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Consistent Toss Cues | 3/3 | Complete    | 2026-09-26 |
-| 2. Dependable Practice Controls | 2/4 | In Progress|  |
+| 2. Dependable Practice Controls | 3/4 | In Progress|  |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |
 

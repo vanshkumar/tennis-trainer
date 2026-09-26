@@ -35,8 +35,8 @@ CAM-01/02 checkboxes record completed implementation and passing automated check
 
 ### Saved-Video Controls
 
-- [ ] **PLAY-01**: A player can seek repeatedly, and only the latest successfully completed seek can resume analysis if playback is still requested.
-- [ ] **PLAY-02**: A player sees an ended state when a clip finishes and can replay from the beginning with fresh tracking and cooldown state.
+- [x] **PLAY-01**: A player can seek repeatedly, and only the latest successfully completed seek can resume analysis if playback is still requested.
+- [x] **PLAY-02**: A player sees an ended state when a clip finishes and can replay from the beginning with fresh tracking and cooldown state.
 - [ ] **PLAY-03**: A player can replace a clip or recover from a failed/cancelled import without an old load or callback taking over the current selection.
 - [ ] **PLAY-04**: A player can repeatedly play and replace clips without accumulating duplicate processing loops or orphaned app-owned video copies; externally owned files are preserved.
 
@@ -96,8 +96,8 @@ Each v1 requirement maps to exactly one owning phase in the approved roadmap; ot
 | VIEW-02 | Phase 3 | Pending |
 | CAM-01 | Phase 2 | Complete |
 | CAM-02 | Phase 2 | Complete |
-| PLAY-01 | Phase 2 | Pending |
-| PLAY-02 | Phase 2 | Pending |
+| PLAY-01 | Phase 2 | Complete |
+| PLAY-02 | Phase 2 | Complete |
 | PLAY-03 | Phase 2 | Pending |
 | PLAY-04 | Phase 2 | Pending |
 | CHECK-01 | Phase 4 | Pending |
