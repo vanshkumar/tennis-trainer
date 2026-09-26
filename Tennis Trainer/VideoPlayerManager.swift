@@ -17,6 +17,14 @@ final class VideoPlayerManager: ObservableObject {
       var observeTicks: ((@escaping () -> Void) -> (() -> Void))? = nil
       var observeTime: ((@escaping (CMTime) -> Void) -> (() -> Void))? = nil
       var frameOutput: (() -> FrameOutputReading)? = nil
+      var observeEvents: ((@escaping (ItemEvent) -> Void) -> (() -> Void))? = nil
+      var snapshot: (() -> PlaybackSnapshot)? = nil
+    }
+    enum ItemEvent { case ended, failed }
+    struct PlaybackSnapshot {
+      var position: CMTime
+      var stopped: Bool
+      var failed: Bool
     }
     enum PlaybackState: Equatable {
       case empty, paused, seeking, playing, failed(String)

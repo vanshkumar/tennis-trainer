@@ -3,6 +3,16 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testCurrentEndClosesPlayIntentAndExtraction() {
+    let f = PlayerEffects()
+    f.load(); f.manager.play()
+    f.position = CMTime(value: 30, timescale: 1)
+    f.stopped = true
+    f.events.last?(.ended)
+    XCTAssertFalse(f.manager.playRequested, "Current end retires requested playback")
+    XCTAssertFalse(f.manager.isPlaying, "Current end closes extraction")
+    XCTAssertEqual(f.activeLoops, 0)
+  }
   func testOnlyLatestSuccessfulSeekMayResume_InEveryCompletionOrder() {
     for oldFirst in [false, true] {
       for oldSuccess in [false, true] {
@@ -148,6 +158,9 @@ final class PlayerEffects {
   var ticks: [() -> Void] = []
   var timeCallbacks: [(CMTime) -> Void] = []
   var holdState = false
+  var stopped = false
+  var failed = false
+  var events: [(VideoPlayerManager.ItemEvent) -> Void] = []
   var stateJobs: [() -> Void] = []
   lazy var manager = VideoPlayerManager(dependencies: .init(
     play: { true }, pause: {}, startLoop: { [weak self] in
@@ -160,7 +173,10 @@ final class PlayerEffects {
     }, observeTicks: { [weak self] callback in
       self?.ticks.append(callback)
       return { [weak self] in self?.retiredTicks += 1 }
-    }, observeTime: { [weak self] callback in self?.timeCallbacks.append(callback); return {} }))
+    }, observeTime: { [weak self] callback in self?.timeCallbacks.append(callback); return {} },
+    observeEvents: { [weak self] callback in self?.events.append(callback); return {} },
+    snapshot: { [weak self] in .init(position: self?.position ?? .invalid,
+      stopped: self?.stopped ?? true, failed: self?.failed ?? false) }))
   func load() { position = .zero; manager.loadVideo(from: URL(fileURLWithPath: "/fixture.mov")) }
   func finish(_ index: Int, _ success: Bool) {
     if success { position = seeks[index].target }
