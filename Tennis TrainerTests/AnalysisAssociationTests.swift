@@ -3,6 +3,92 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class AnalysisAssociationTests: XCTestCase {
+  func testCompleteCameraCue_WhenRealPreparationAndDecoderAreUsed() throws {
+    try runCompleteAdapter(cameraMode: true)
+  }
+
+  func testCompletePlaybackCue_WhenRealPreparationAndDecoderAreUsed() throws {
+    try runCompleteAdapter(cameraMode: false)
+  }
+
+  private func runCompleteAdapter(cameraMode: Bool) throws {
+    var windows: [[AnalysisFrame.Metadata]] = []
+    let grid = GridTrackNetDetector(predictor: { window in
+      windows.append(window.frames.map(\.metadata))
+      return try DecoderFixture.tossOutputs(window)
+    })
+    let manager = BallDetectionManager(dependencies: .init(analyze: { input, identity, pose in
+      guard grid.pushFrame(input: input, identity: identity, pose: pose) else { return .init(samples: nil, position: nil) }
+      return .init(samples: grid.detectAllSamplesIfReady(), position: nil)
+    }, extractPose: { _, identity in
+      .init(identity: identity, joints: [.nose: .init(location: CGPoint(x: 0.5,
+        y: identity.sequence == 3 ? 0.6 : 0.95), confidence: 0.9)])
+    }, reset: grid.clear, bufferDiagnostics: { grid.diagnostics }, worker: { $0() }, publication: { $0() }))
+    let camera = CameraManager(), player = VideoPlayerManager()
+    let pose = PoseDetectionManager()
+    var cues = 0
+    if cameraMode {
+      camera.setupBallDetection(with: pose, factory: { _ in manager })
+      camera.onApex = { cues += 1 }
+    } else {
+      player.setupBallDetection(with: pose, factory: { _ in manager })
+      player.onApex = { cues += 1 }
+    }
+    let pixels = try AnalysisFixture.pixels()
+    let output = CompleteOutput(pixels)
+    for sequence in 1...9 {
+      let time = CMTime(value: Int64(10000 + sequence * 33), timescale: 1000)
+      if cameraMode { camera.submitSampleBuffer(try CompleteOutput.sample(pixels, time: time)) }
+      else {
+        output.time = time
+        player.processCurrentFrame(output: output, requestedTime: CMTime(value: 900, timescale: 1), orientation: .left)
+      }
+      if sequence < 5 { XCTAssertEqual(cues, 0) }
+    }
+    XCTAssertEqual(cues, 1)
+    XCTAssertEqual(windows.count, 5)
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 9)
+    XCTAssertEqual(manager.cueDiagnostics.lastEmittedCandidateIdentity?.sequence, 3)
+    for (windowIndex, window) in windows.enumerated() {
+      for (t, metadata) in window.enumerated() {
+        let sequence = windowIndex + t + 1
+        XCTAssertEqual(metadata.identity.sequence, UInt64(sequence))
+        XCTAssertEqual(metadata.sourceTime, CMTime(value: Int64(10000 + sequence * 33), timescale: 1000))
+        XCTAssertEqual(metadata.pose.identity, metadata.identity)
+        XCTAssertEqual(metadata.pose.baselineY, sequence == 3 ? 0.6 : 0.95)
+        XCTAssertEqual(metadata.orientedSize, CGSize(width: 432, height: 768))
+        XCTAssertEqual(metadata.mapping.scale, 0.5625)
+        XCTAssertEqual(metadata.mapping.offsetX, 262.5)
+        XCTAssertEqual(metadata.orientation, cameraMode ? .right : .left)
+      }
+    }
+    // The same acquired rational time, even under another representation, cannot be consumed twice.
+    let last = CMTime(value: 20594, timescale: 2000)
+    if cameraMode { camera.submitSampleBuffer(try CompleteOutput.sample(pixels, time: last)) }
+    else { output.time = last; player.processCurrentFrame(output: output, requestedTime: .zero, orientation: .left) }
+    XCTAssertEqual(manager.cueDiagnostics.consumedCount, 9)
+    XCTAssertEqual(cues, 1)
+    XCTAssertEqual(windows.count, 5)
+  }
+
+  private final class CompleteOutput: VideoPlayerManager.FrameOutputReading {
+    let pixels: CVPixelBuffer
+    var time = CMTime.zero
+    init(_ pixels: CVPixelBuffer) { self.pixels = pixels }
+    func hasNewPixelBuffer(forItemTime: CMTime) -> Bool { true }
+    func copyFrame(forItemTime: CMTime) -> (CVPixelBuffer, CMTime)? { (pixels, time) }
+    static func sample(_ pixels: CVPixelBuffer, time: CMTime) throws -> CMSampleBuffer {
+      var format: CMVideoFormatDescription?
+      XCTAssertEqual(CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pixels,
+        formatDescriptionOut: &format), noErr)
+      var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+      var sample: CMSampleBuffer?
+      XCTAssertEqual(CMSampleBufferCreateReadyWithImageBuffer(allocator: nil, imageBuffer: pixels,
+        formatDescription: try XCTUnwrap(format), sampleTiming: &timing, sampleBufferOut: &sample), noErr)
+      return try XCTUnwrap(sample)
+    }
+  }
+
   func testSlidingWindowsAndReplayAfterPruning_KeepBoundedManagerCueState() throws {
     var history: [GridTrackNetDetector.Sample] = []
     var original: [GridTrackNetDetector.Sample] = []

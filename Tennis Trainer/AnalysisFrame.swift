@@ -7,6 +7,16 @@ import QuartzCore
 
 /// Prepared pixels are allocated once, then only read by the ring and its snapshots.
 struct AnalysisFrame {
+  /// Allocation seams for deterministic failure/ownership tests; defaults are the real transforms.
+  struct Preparation {
+    var orient: (CVPixelBuffer, CGImagePropertyOrientation) -> CVPixelBuffer? = {
+      PixelBufferScaler.shared.copyApplyingOrientation($0, orientation: $1)
+    }
+    var resize: (CVPixelBuffer, Bool) -> CVPixelBuffer? = { pixels, portrait in
+      portrait ? PixelBufferScaler.shared.resizeAspectFit(pixels, width: 768, height: 432)
+        : PixelBufferScaler.shared.resizeAspectFill(pixels, width: 768, height: 432)
+    }
+  }
   struct Mapping: Equatable {
     let sourceWidth: Float
     let sourceHeight: Float
@@ -104,10 +114,10 @@ struct AnalysisFrame {
 
   static func prepare(input: BallDetectionManager.Input, identity: BallDetectionManager.FrameIdentity,
                       pose: PoseDetectionManager.FramePose,
-                      ingressTime: CFTimeInterval? = nil) -> AnalysisFrame? {
+                      ingressTime: CFTimeInterval? = nil,
+                      preparation: Preparation = .init()) -> AnalysisFrame? {
     guard input.sourceID == identity.sourceID,
-          let oriented = PixelBufferScaler.shared.copyApplyingOrientation(input.pixelBuffer,
-            orientation: input.orientation) else { return nil }
+          let oriented = preparation.orient(input.pixelBuffer, input.orientation) else { return nil }
     let rawSize = CGSize(width: CVPixelBufferGetWidth(input.pixelBuffer),
                          height: CVPixelBufferGetHeight(input.pixelBuffer))
     let w = CGFloat(CVPixelBufferGetWidth(oriented))
@@ -122,9 +132,7 @@ struct AnalysisFrame {
       mapping: mapping, pose: pose)
     guard metadata.isValid else { return nil }
     // The scaler allocates even at unit scale: .up/exact-size input must not alias capture memory.
-    let prepared = portrait
-      ? PixelBufferScaler.shared.resizeAspectFit(oriented, width: 768, height: 432)
-      : PixelBufferScaler.shared.resizeAspectFill(oriented, width: 768, height: 432)
+    let prepared = preparation.resize(oriented, portrait)
     guard let prepared else { return nil }
     return AnalysisFrame(pixels: prepared, metadata: metadata)
   }

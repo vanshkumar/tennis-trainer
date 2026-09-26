@@ -26,11 +26,13 @@ final class GridTrackNetDetector {
 
   typealias Predictor = (AnalysisFrame.Window) throws -> RawOutputs
   private let predictor: Predictor
+  private let preparation: AnalysisFrame.Preparation
   private var frames: [AnalysisFrame] = []
   private let sync = NSLock()
   private let predictionLock = NSLock()
 
-  init(predictor: @escaping Predictor) {
+  init(preparation: AnalysisFrame.Preparation = .init(), predictor: @escaping Predictor) {
+    self.preparation = preparation
     self.predictor = predictor
   }
 
@@ -79,7 +81,8 @@ final class GridTrackNetDetector {
   @discardableResult
   func pushFrame(input: BallDetectionManager.Input, identity: BallDetectionManager.FrameIdentity,
                  pose: PoseDetectionManager.FramePose) -> Bool {
-    guard let frame = AnalysisFrame.prepare(input: input, identity: identity, pose: pose) else { return false }
+    guard let frame = AnalysisFrame.prepare(input: input, identity: identity, pose: pose,
+      preparation: preparation) else { return false }
     sync.lock()
     defer { sync.unlock() }
     if let previous = frames.last?.metadata.identity {

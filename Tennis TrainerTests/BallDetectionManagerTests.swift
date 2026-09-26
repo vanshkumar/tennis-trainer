@@ -4,6 +4,177 @@ import CoreML
 @testable import Tennis_Trainer
 
 final class BallDetectionManagerTests: XCTestCase {
+  func testUniqueBufferBound_WhenTwoManagersHoldPreparationPredictionAndPublication() throws {
+    for resetDuringPrediction in [false, true] {
+      let ledger = BufferLedger()
+      let prepared = expectation(description: "two transient preparations")
+      prepared.expectedFulfillmentCount = 2
+      let predicting = expectation(description: "two prediction snapshots")
+      predicting.expectedFulfillmentCount = 2
+      let finished = expectation(description: "workers return")
+      finished.expectedFulfillmentCount = 2
+      let resumePreparation = DispatchSemaphore(value: 0)
+      let resumePrediction = DispatchSemaphore(value: 0)
+      let workers = [Scheduler(), Scheduler()], publications = [Scheduler(), Scheduler()]
+      var holding = false
+      var effects = 0
+      var managers: [BallDetectionManager] = (0..<2).map { index in
+        let preparation = AnalysisFrame.Preparation(orient: { raw, orientation in
+          ledger.record(raw)
+          let oriented = PixelBufferScaler.shared.copyApplyingOrientation(raw, orientation: orientation)
+          if let oriented { ledger.record(oriented) }
+          return oriented
+        }, resize: { oriented, portrait in
+          let resized = portrait
+            ? PixelBufferScaler.shared.resizeAspectFit(oriented, width: 768, height: 432)
+            : PixelBufferScaler.shared.resizeAspectFill(oriented, width: 768, height: 432)
+          if let resized { ledger.record(resized) }
+          if holding { prepared.fulfill(); resumePreparation.wait() }
+          return resized
+        })
+        let grid = GridTrackNetDetector(preparation: preparation, predictor: { window in
+          XCTAssertEqual(Set(window.frames.map { ObjectIdentifier($0.pixels) }).count, 5)
+          if holding { predicting.fulfill(); resumePrediction.wait() }
+          return try DecoderFixture.tossOutputs(window)
+        })
+        let manager = BallDetectionManager(dependencies: .init(analyze: { input, identity, pose in
+          guard grid.pushFrame(input: input, identity: identity, pose: pose) else { return .init(samples: nil, position: nil) }
+          return .init(samples: grid.detectAllSamplesIfReady(), position: nil)
+        }, reset: grid.clear, bufferDiagnostics: { grid.diagnostics },
+        worker: workers[index].enqueue, publication: publications[index].enqueue))
+        manager.onApex = { effects += 1 }
+        return manager
+      }
+      let sources = [UUID(), UUID()]
+      for index in 0..<2 {
+        for sequence in 1...5 {
+          try autoreleasepool {
+            let raw = try ledger.rawPixels()
+            XCTAssertTrue(managers[index].process(input: .init(pixelBuffer: raw,
+              sourceTime: CMTime(value: Int64(sequence), timescale: 30), orientation: .right, sourceID: sources[index])))
+            workers[index].run()
+          }
+          publications[index].run()
+        }
+      }
+      XCTAssertEqual(ledger.liveCount, 10)
+      XCTAssertEqual(ledger.destroyedRaw, 10)
+      XCTAssertEqual(effects, 2)
+      holding = true
+      for index in 0..<2 {
+        try autoreleasepool {
+          let raw = try ledger.rawPixels()
+          XCTAssertTrue(managers[index].process(input: .init(pixelBuffer: raw,
+            sourceTime: CMTime(value: 6, timescale: 30), orientation: .right, sourceID: sources[index])))
+        }
+        DispatchQueue.global().async { autoreleasepool { workers[index].run() }; finished.fulfill() }
+      }
+      wait(for: [prepared], timeout: 10)
+      XCTAssertEqual(ledger.liveCount, 16)
+      XCTAssertEqual(ledger.highWater, 16)
+      let rejected = try AnalysisFixture.pixels(width: 16, height: 16)
+      for index in 0..<2 {
+        for time in 7...1006 {
+          XCTAssertFalse(managers[index].process(input: input(rejected, Int64(time), source: sources[index])))
+        }
+      }
+      XCTAssertEqual(ledger.liveCount, 16)
+      XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 2)
+      XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.pendingInputs }, 0)
+      resumePreparation.signal(); resumePreparation.signal()
+      wait(for: [predicting], timeout: 10)
+      XCTAssertEqual(ledger.liveCount, 12) // ten shared ring/snapshot pixels plus two raw inputs
+      if resetDuringPrediction { managers.forEach { $0.resetTrackingState() } }
+      resumePrediction.signal(); resumePrediction.signal()
+      wait(for: [finished], timeout: 10)
+      XCTAssertEqual(ledger.destroyedRaw, 12)
+      XCTAssertEqual(ledger.liveCount, resetDuringPrediction ? 0 : 10)
+      XCTAssertEqual(publications.reduce(0) { $0 + $1.jobs.count }, 2)
+      XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.publications }, 2)
+      for index in 0..<2 {
+        for time in 1007...2006 {
+          XCTAssertFalse(managers[index].process(input: input(rejected, Int64(time), source: sources[index])))
+        }
+      }
+      managers.forEach { $0.resetTrackingState() }
+      publications.forEach { $0.run() }
+      XCTAssertEqual(effects, 2)
+      XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.released }, 12)
+      XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 0)
+      XCTAssertLessThanOrEqual(managers.reduce(0) { $0 + $1.cueDiagnostics.retainedEntryCount }, 6)
+      managers.removeAll()
+      XCTAssertEqual(ledger.liveCount, 0)
+      XCTAssertEqual(ledger.highWater, 16)
+    }
+  }
+
+  func testPixelAndLeaseRelease_WhenRealPipelineTerminatesOrOwnerDisappears() throws {
+    enum Failure: Error { case missingModel, prediction, pose }
+    for terminal in ["warmup", "missing-model", "pose-absent", "pose-error", "orientation", "resize",
+                     "prediction", "malformed", "stale", "discard", "teardown-worker", "teardown-publication"] {
+      let ledger = BufferLedger(), worker = Scheduler(), publication = Scheduler()
+      let preparation = AnalysisFrame.Preparation(orient: { raw, orientation in
+        ledger.record(raw)
+        if terminal == "orientation" { return nil }
+        let result = PixelBufferScaler.shared.copyApplyingOrientation(raw, orientation: orientation)
+        if let result { ledger.record(result) }
+        return result
+      }, resize: { oriented, portrait in
+        if terminal == "resize" { return nil }
+        let result = portrait ? PixelBufferScaler.shared.resizeAspectFit(oriented, width: 768, height: 432)
+          : PixelBufferScaler.shared.resizeAspectFill(oriented, width: 768, height: 432)
+        if let result { ledger.record(result) }
+        return result
+      })
+      let pose = PoseDetectionManager(transaction: { _, _ in
+        if terminal == "pose-error" { throw Failure.pose }
+        return [:]
+      })
+      var manager: BallDetectionManager? = {
+        let grid = GridTrackNetDetector(preparation: preparation, predictor: { window in
+          if terminal == "missing-model" { throw Failure.missingModel }
+          if terminal == "prediction" { throw Failure.prediction }
+          let output = try DecoderFixture.tossOutputs(window)
+          if terminal == "malformed" { output.xOff[0] = NSNumber(value: Float.infinity) }
+          return output
+        })
+        return BallDetectionManager(dependencies: .init(analyze: { input, identity, pose in
+          guard grid.pushFrame(input: input, identity: identity, pose: pose) else { return .init(samples: nil, position: nil) }
+          return .init(samples: grid.detectAllSamplesIfReady(), position: nil)
+        }, extractPose: { input, identity in
+          pose.extractPose(in: input.pixelBuffer, orientation: input.orientation, identity: identity)
+        }, reset: grid.clear, bufferDiagnostics: { grid.diagnostics }, worker: worker.enqueue, publication: publication.enqueue))
+      }()
+      var cues = 0
+      manager?.onApex = { cues += 1 }
+      weak var weakManager = manager
+      let source = UUID()
+      let total = terminal == "warmup" || terminal.hasPrefix("teardown") ? 1 : 5
+      for sequence in 1...total {
+        try autoreleasepool {
+          let raw = try ledger.rawPixels()
+          XCTAssertTrue(manager!.process(input: .init(pixelBuffer: raw,
+            sourceTime: CMTime(value: Int64(sequence), timescale: 30), orientation: .right, sourceID: source)))
+        }
+        if terminal == "teardown-worker" { manager = nil }
+        if terminal == "stale" && sequence == total { manager?.resetTrackingState() }
+        autoreleasepool { worker.run() }
+        XCTAssertEqual(ledger.destroyedRaw, sequence, terminal)
+        if terminal == "teardown-publication" { manager = nil }
+        if terminal == "discard" && sequence == total { manager?.resetTrackingState() }
+        if !publication.jobs.isEmpty { publication.run() }
+        XCTAssertEqual(manager?.diagnostics.currentLeases ?? 0, 0, terminal)
+        if let manager { XCTAssertEqual(manager.diagnostics.released, UInt64(sequence), terminal) }
+        XCTAssertLessThanOrEqual(ledger.liveCount, 5, terminal)
+      }
+      XCTAssertEqual(cues, ["pose-absent", "pose-error"].contains(terminal) ? 1 : 0, terminal)
+      manager = nil
+      XCTAssertNil(weakManager, terminal)
+      XCTAssertEqual(ledger.liveCount, 0, terminal)
+      XCTAssertLessThanOrEqual(ledger.highWater, 8, terminal)
+    }
+  }
+
   func testPreparedPixelsRemainOwned_WhenSourceIsMutated() throws {
     let source = try AnalysisFixture.pixels(sentinel: 42)
     let identity = AnalysisFixture.identity(1)
@@ -489,6 +660,50 @@ final class BallDetectionManagerTests: XCTestCase {
     XCTAssertEqual(maximum, 1)
     publications.forEach { $0.run() }
     XCTAssertEqual(managers.reduce(0) { $0 + $1.diagnostics.currentLeases }, 0)
+  }
+}
+
+private final class BufferLedger {
+  private final class WeakBuffer {
+    weak var value: CVPixelBuffer?
+    init(_ value: CVPixelBuffer) { self.value = value }
+  }
+  private final class RawStorage {
+    let bytes = UnsafeMutableRawPointer.allocate(byteCount: 768 * 432 * 4, alignment: 64)
+    let onRelease: () -> Void
+    init(onRelease: @escaping () -> Void) { self.onRelease = onRelease; bytes.initializeMemory(as: UInt8.self, repeating: 0, count: 768 * 432 * 4) }
+    deinit { bytes.deallocate(); onRelease() }
+  }
+  private let lock = NSLock()
+  private var buffers: [WeakBuffer] = []
+  private var maximum = 0
+  private var releases = 0
+  var highWater: Int { lock.lock(); defer { lock.unlock() }; return maximum }
+  var destroyedRaw: Int { lock.lock(); defer { lock.unlock() }; return releases }
+  var liveCount: Int {
+    lock.lock(); defer { lock.unlock() }
+    return Set(buffers.compactMap { $0.value.map(ObjectIdentifier.init) }).count
+  }
+  func record(_ buffer: CVPixelBuffer) {
+    lock.lock(); defer { lock.unlock() }
+    buffers.removeAll { $0.value == nil }
+    buffers.append(WeakBuffer(buffer))
+    maximum = max(maximum, Set(buffers.compactMap { $0.value.map(ObjectIdentifier.init) }).count)
+  }
+  func rawPixels() throws -> CVPixelBuffer {
+    let storage = RawStorage { [weak self] in
+      guard let self else { return }
+      self.lock.lock(); self.releases += 1; self.lock.unlock()
+    }
+    let context = Unmanaged.passRetained(storage).toOpaque()
+    var pixels: CVPixelBuffer?
+    let result = CVPixelBufferCreateWithBytes(nil, 768, 432, kCVPixelFormatType_32BGRA,
+      storage.bytes, 768 * 4, { context, _ in
+        if let context { Unmanaged<RawStorage>.fromOpaque(context).release() }
+      }, context, nil, &pixels)
+    if result != kCVReturnSuccess { Unmanaged<RawStorage>.fromOpaque(context).release() }
+    XCTAssertEqual(result, kCVReturnSuccess)
+    return try XCTUnwrap(pixels)
   }
 }
 

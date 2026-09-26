@@ -39,6 +39,11 @@ final class GridTrackNetDecoderTests: XCTestCase {
     }
     let overlapping = try DecoderFixture.tensor(shape: [5, 48, 27], strides: [1, 1, 1])
     XCTAssertNil(detector.decode(.init(conf: overlapping, xOff: outputs.xOff, yOff: outputs.yOff), window: window))
+    let badLayout = try ReportedLayoutArray(shape: [5, 48, 27], dataType: .float16)
+    for strides in [[1296, 27, 0], [1296, -27, 1], [1296, 27], [Int.max, 27, 1], [100000, 270, 1]] {
+      badLayout.reportedStrides = strides.map(NSNumber.init)
+      XCTAssertNil(detector.decode(.init(conf: badLayout, xOff: outputs.xOff, yOff: outputs.yOff), window: window))
+    }
     for count in 0..<5 { XCTAssertNil(AnalysisFrame.Window(Array(window.frames.prefix(count)))) }
   }
 
@@ -108,9 +113,58 @@ final class GridTrackNetDecoderTests: XCTestCase {
     XCTAssertNil(samples[2].position)
     XCTAssertEqual(samples[1].metadata.identity, window.frames[1].metadata.identity)
   }
+
+  func testPreparedPixelQuadrants_WhenInputIsRotatedAndFitted() throws {
+    let raw = try AnalysisFixture.pixels()
+    CVPixelBufferLockBaseAddress(raw, [])
+    let base = CVPixelBufferGetBaseAddress(raw)!.assumingMemoryBound(to: UInt8.self)
+    let stride = CVPixelBufferGetBytesPerRow(raw)
+    for row in 0..<432 {
+      for column in 0..<768 {
+        let value: UInt8 = (row < 216 ? 10 : 90) + (column < 384 ? 0 : 40)
+        for channel in 0..<3 { base[row * stride + column * 4 + channel] = value }
+      }
+    }
+    CVPixelBufferUnlockBaseAddress(raw, [])
+    for (orientation, expected) in [(CGImagePropertyOrientation.up, [10, 50, 90, 130]),
+      (.right, [90, 10, 130, 50]), (.left, [50, 130, 10, 90]), (.down, [130, 90, 50, 10])] {
+      let id = AnalysisFixture.identity(1)
+      let frame = try XCTUnwrap(AnalysisFrame.prepare(input: .init(pixelBuffer: raw,
+        sourceTime: id.sourceTime, orientation: orientation, sourceID: id.sourceID),
+        identity: id, pose: .init(identity: id, joints: [:])))
+      XCTAssertFalse(frame.pixels === raw)
+      CVPixelBufferLockBaseAddress(frame.pixels, .readOnly)
+      let bytes = CVPixelBufferGetBaseAddress(frame.pixels)!.assumingMemoryBound(to: UInt8.self)
+      let rowStride = CVPixelBufferGetBytesPerRow(frame.pixels)
+      let xs = orientation == .right || orientation == .left ? [323, 445] : [192, 576]
+      let points = [(xs[0], 108), (xs[1], 108), (xs[0], 324), (xs[1], 324)]
+      for (index, point) in points.enumerated() {
+        XCTAssertEqual(Int(bytes[point.1 * rowStride + point.0 * 4]), expected[index], "\(orientation) quadrant \(index)")
+      }
+      CVPixelBufferUnlockBaseAddress(frame.pixels, .readOnly)
+    }
+  }
+
+  private final class ReportedLayoutArray: MLMultiArray {
+    var reportedStrides: [NSNumber]?
+    override var strides: [NSNumber] { reportedStrides ?? super.strides }
+  }
 }
 
 enum DecoderFixture {
+  static func tossOutputs(_ window: AnalysisFrame.Window) throws -> GridTrackNetDetector.RawOutputs {
+    let conf = try tensor(shape: [5, 48, 27], strides: [1600, 32, 1])
+    let x = try tensor(shape: [5, 27, 48], strides: [1800, 64, 1])
+    let y = try tensor(shape: [1, 5, 48, 27], strides: [12000, 2100, 40, 1])
+    for (t, frame) in window.frames.enumerated() {
+      let top: Float = frame.metadata.identity.sequence == 3 ? 3.375 : 13.5
+      let row = Int(top)
+      conf[[NSNumber(value: t), 24, NSNumber(value: row)]] = 0.875
+      y[[0, NSNumber(value: t), 24, NSNumber(value: row)]] = NSNumber(value: top - Float(row))
+    }
+    return .init(conf: conf, xOff: x, yOff: y)
+  }
+
   static func tensor(shape: [Int], strides: [Int]) throws -> MLMultiArray {
     let count = zip(shape, strides).reduce(1) { $0 + ($1.0 - 1) * $1.1 }
     let storage = UnsafeMutablePointer<UInt16>.allocate(capacity: count)
