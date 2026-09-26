@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Phase 1 human acceptance**
+- Observation: The user separately passed the evidence-limit review, original-five-frame association contract, and exact source/session/frame pose with the strict fallback above 0.70. These decisions resolve Phase 1's previously undefined edge obligations without adding runtime measurements.
+- Action: Use `01-UAT.md` as the human acceptance record and preserve the Phase 4 clip/device/process-memory/audio obligations when describing Phase 1 as complete.
+- Confidence: high
+
 **2026-09-26 — Phase 1 UAT coverage precheck**
 - Observation: The verify-work API gate parsed `01-COVERAGE.md`, which contains requirements coverage, as an API matrix and rejected it as empty. The phase only changes the existing on-device pipeline.
 - Action: Keep the supported `No external API integration: <reason>` declaration in this phase's coverage document; preserve the requirements tables and enabled gate rather than inventing API rows.

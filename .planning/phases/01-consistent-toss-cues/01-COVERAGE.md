@@ -58,6 +58,8 @@ The supplied report has seven items. Five explicit resolutions are preserved ver
 
 No-silent-drop equality: 7 surfaced = 5 truths + 2 flagged assumptions. The manual tests do not relabel unclassified probe results as resolved.
 
+UAT resolution — 2026-09-26: The user explicitly passed the original-five-frame contract for EDGE-CUE-01 and the exact-identity pose-or-missing contract for EDGE-CUE-04. See `01-UAT.md` tests 2–3 and `01-VERIFICATION.md`. This human decision closes the planning ambiguity; it does not fabricate or execute an undefined probe. The evidence-claim prohibition below was separately reviewed and passed in UAT test 1.
+
 ## Prohibition recall
 
 Adversarial recall considered per requirement the following candidates: wrong source/geometry/time, reused pixels, host-time substitution, hidden uploads, repurposed coaching scope, unsupported accuracy claims, lost provenance, and synthetic evidence represented as measured behavior (CUE-01); unbounded input/publication/history, premature lease release, hidden capture retention, frozen controls, concealed drops, invented FPS, finite-queue claims represented as physical latency, and unbounded diagnostics (CUE-02); duplicate windows/candidates, post-pruning replay, skipped nil identities, out-of-order evidence, cooldown hiding dedup, tuning eligibility to improve scores, manual beeps counted as detector success, unsupported physical-toss segmentation, and misleading synthetic accuracy claims (CUE-03); shared/latest pose, stale/missing inheritance, wrong identity, confidence treated as freshness, concurrency races, ambiguous nearest-time pairing, silent fallback changes, unapproved handedness/multiplayer expansion, pose-data leakage, and unjustified reliability claims (CUE-04).

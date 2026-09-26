@@ -10,6 +10,8 @@ screenshots: not_captured
 
 **Applicability:** The six-pillar visual audit does not apply to this phase. No pillar scores, overall score, or visual pass are assigned.
 
+Verify-work refresh — 2026-09-26: Production and tests are unchanged from the reviewed source. The completed UAT consists of evidence/behavior-contract decisions; it introduces no screen or visual change. The existing not-applicable result remains current; no new screenshots or visual acceptance are claimed.
+
 ## Scope Evidence
 
 - Read all three Phase 1 plans and summaries. They implement source-time ingress, bounded inference/publication, owned prediction windows, candidate-associated pose, cue deduplication, and tensor decoding. No UI-SPEC.md or CONTEXT.md exists for this phase.

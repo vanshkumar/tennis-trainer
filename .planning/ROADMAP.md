@@ -5,12 +5,12 @@
 Make the existing toss-apex cue dependable in both live-camera practice and saved-video review. First establish consistent feedback from correctly associated frames and pose data, then make session controls trustworthy, align visible tracking with the displayed image, and verify the combined behavior with repeatable clips and real-device evidence. Each phase delivers an observable outcome in the existing app and includes its own regression checks.
 
 **Milestone:** Toss-apex reliability
-**Status:** Phase 1 implementation and automated checks complete 2026-09-25; human verification pending
+**Status:** Phase 1 complete 2026-09-26; Phase 2 ready for discussion and planning
 **Structure:** Coarse, vertical MVP phases; preserve portrait, right-handed solo practice and on-device processing.
 
 ## Phases
 
-- [ ] **Phase 1: Consistent Toss Cues** - Associate each cue with its actual frames and pose, without duplicate events or accumulating inference work.
+- [x] **Phase 1: Consistent Toss Cues** - Associate each cue with its actual frames and pose, without duplicate events or accumulating inference work. (completed 2026-09-26)
 - [ ] **Phase 2: Dependable Practice Controls** - Stop, recover camera access, seek, replay, and replace clips without stale feedback or incorrect state.
 - [ ] **Phase 3: Accurate Visible Tracking** - Align ball and pose overlays with the actual live preview and imported-video image.
 - [ ] **Phase 4: Verified Practice Reliability** - Establish repeatable regression, clip, and device evidence against criteria fixed before final scoring.
@@ -30,16 +30,16 @@ Make the existing toss-apex cue dependable in both live-camera practice and save
 3. A fully observed eligible toss produces at most one automatic cue when timestamps repeat or five-frame windows overlap; the existing cooldown remains a separate eligibility rule.
 4. Delaying or removing pose observations cannot substitute a newer or stale body position for the toss sample's height gate; the corresponding valid pose or documented fallback determines the result.
 
-**Plans:** 3/3 plans executed across 3 sequential waves
+**Plans:** 3/3 plans complete
 **Wave 1**
 
 - [x] 01-01-PLAN.md
 
-**Wave 2** *(blocked on Wave 1 completion)*
+**Wave 2** *(completed after Wave 1)*
 
 - [x] 01-02-PLAN.md
 
-**Wave 3** *(blocked on Wave 2 completion)*
+**Wave 3** *(completed after Wave 2)*
 
 - [x] 01-03-PLAN.md
 
@@ -137,7 +137,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Consistent Toss Cues | 3/3 | In Progress | - |
+| 1. Consistent Toss Cues | 3/3 | Complete    | 2026-09-26 |
 | 2. Dependable Practice Controls | 0/TBD | Not started | - |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |

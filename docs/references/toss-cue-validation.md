@@ -261,3 +261,7 @@ Phase 2 owns complete control transitions; Phase 3 owns displayed alignment;
 Phase 4 owns permitted/labeled corpus acquisition, frozen numeric empirical
 criteria, sustained device/memory testing and physical audio timing. Those missing
 checks remain required evidence, not passes.
+
+## Phase 01 human review — 2026-09-26
+
+The user passed all three reviews in `.planning/phases/01-consistent-toss-cues/01-UAT.md`: evidence limits, original-five-frame association, and exact source/session/frame pose with the strict missing-pose fallback above 0.70. This explicitly resolves the earlier transparency-review flag and the two undefined edge items against their tested contracts. It does not claim that an unspecified probe ran, or establish any new clip, device, process-memory or physical-audio measurement. All Phase 4 evidence obligations above remain pending.

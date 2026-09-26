@@ -1,7 +1,7 @@
 ---
 phase: 01-consistent-toss-cues
-verified: 2026-09-26T04:48:00Z
-status: human_needed
+verified: 2026-09-26T13:39:03Z
+status: passed
 score: 12/12 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
@@ -20,6 +20,7 @@ covered_files:
   - .planning/phases/01-consistent-toss-cues/01-RESEARCH.md
   - .planning/phases/01-consistent-toss-cues/01-REVIEW.md
   - .planning/phases/01-consistent-toss-cues/01-SECURITY.md
+  - .planning/phases/01-consistent-toss-cues/01-UAT.md
   - .planning/phases/01-consistent-toss-cues/01-UI-REVIEW.md
   - ARCHITECTURE.md
   - GRIDTRACKNET_COREML.md
@@ -44,26 +45,28 @@ covered_files:
   - docs/references/README.md
   - docs/references/toss-cue-validation.md
 
-covered_digest: "v1:sha256:08d548c54c75e3664d713d133e29f92801c2091ca8596ea048e2806ea3988a8c"
+covered_digest: "v1:sha256:c32b73ea3156a01e194af6c135e5eeba45d15344acbf74bc88c2900ddbc1d70a"
 decision_coverage:
   honored: 0
   total: 0
   not_honored: []
-flagged_prohibitions:
+flagged_prohibitions: []
+resolved_prohibitions:
 
   - statement: "The reliability work must not present synthetic cue counts, finite queue bounds, or software callback times as measured real-toss accuracy or physical beep latency."
-    status: unverified
-    reason: "Descriptor-less unresolved prohibition; no enforcement descriptor or human acceptance was supplied."
-    judgment: "NON-AUTHORITATIVE: inspected documentation separates deterministic evidence from empirical claims."
-    flag: "unverified-prohibition — human review recommended"
-unresolved_edge_items:
+    status: human_verified
+    evidence: "01-UAT.md test 1: user replied pass at 2026-09-26T13:27:51Z after reviewing the evidence limits."
+unresolved_edge_items: []
+resolved_edge_items:
 
   - id: EDGE-CUE-01
-    status: unclassified_unresolved
-    reason: "Manual association contract has passing deterministic tests; the supplied edge item has no classification or check descriptor."
+    status: human_resolved
+    contract: "Use the original five owned images, timestamps and coordinate mappings despite newer input or capture-buffer reuse."
+    evidence: "01-UAT.md test 2: user replied pass at 2026-09-26T13:29:18Z. Existing held-window and source-mutation tests support the accepted contract."
   - id: EDGE-CUE-04
-    status: unclassified_unresolved
-    reason: "Manual exact-identity pose/fallback contract has passing deterministic tests; the supplied edge item has no classification or check descriptor."
+    status: human_resolved
+    contract: "Use exact source/session/frame pose or explicit missing-pose fallback strictly above 0.70."
+    evidence: "01-UAT.md test 3: user replied pass at 2026-09-26T13:39:03Z. Existing association and threshold tests support the accepted contract."
 deferred:
 
   - truth: "Every stop, pause, seek, replacement, completion and mode-exit transition invalidates old effects."
@@ -75,27 +78,22 @@ deferred:
   - truth: "Real toss sampling sufficiency, representative clip accuracy, sustained process memory and physical beep latency meet frozen criteria."
     addressed_in: "Phase 4"
     evidence: "Phase 4 success criteria 2–5 require permitted labeled clips, frozen acceptance limits, real devices, physical audio and explicit outstanding checks."
-human_verification:
-
-  - test: "Review the final ownership ledger, permitted-media inventory and reliability claims, explicitly resolving the transparency prohibition."
-    expected: "Accept only the tested eight-buffer per-manager/sixteen-buffer aggregate app-pipeline bound; retain clip, device, framework/process-memory and physical-audio evidence as unavailable. Record a human decision on the prohibition."
-    why_human: "01-03-PLAN.md explicitly defers this human-check; the unresolved prohibition has no deterministic enforcement descriptor. LLM review cannot silently approve it."
-  - test: "Classify or explicitly resolve EDGE-CUE-01 against the held-window association contract."
-    expected: "Confirm the intended edge obligation or provide a held-out check; preserve the passing exact-frame/pixel/time/geometry tests without claiming the unclassified probe itself passed."
-    why_human: "The original edge item remains unclassified/unresolved and supplies no executable predicate."
-  - test: "Classify or explicitly resolve EDGE-CUE-04 against the exact-identity pose-or-fallback contract."
-    expected: "Confirm exact source/generation/frame association and strict fallback above 0.70, or specify the missing edge obligation and a held-out check."
-    why_human: "Passing manually specified pose cases cannot silently classify the original unresolved edge item."
+human_verification: []
+human_review:
+  status: complete
+  passed: 3
+  issues: 0
+  evidence: 01-UAT.md
 ---
 
 # Phase 1: Consistent Toss Cues Verification Report
 
 **Phase Goal:** As a player, I want to receive consistent toss feedback tied to the frames and body pose being analyzed in either mode, so that I can trust feedback for my current toss.
-**Verified:** 2026-09-26T04:48:00Z
-**Status:** human_needed
-**Re-verification:** No — initial verification; no previous VERIFICATION.md or overrides existed.
+**Verified:** 2026-09-26T13:39:03Z
+**Status:** passed after human UAT
+**Re-verification:** Initial source/test verification at 2026-09-26T04:48:00Z, followed by three explicit user passes. Production and tests are unchanged; no new runtime measurements or overrides were introduced.
 
-The deterministic Phase 1 contract is implemented and behaviorally supported. All four CUE requirements are satisfied within that contract. No production blocker was found. Final acceptance remains **human_needed** because the plan deliberately retains an evidence-claim review, one unresolved transparency prohibition, and two unclassified edge items. **12/12 is a deterministic truth score, not empirical release acceptance.** Complete with **1 flagged prohibition and 2 unresolved edge items**; neither is silently green.
+The deterministic Phase 1 contract is implemented and behaviorally supported. All four CUE requirements are satisfied within that contract. No production blocker was found. The user explicitly passed the evidence-claim review and both edge-contract reviews in `01-UAT.md`, resolving the prior human-needed status. **12/12 is a deterministic truth score, not empirical release acceptance.** No Phase 1 human review item remains open; later clip/device/audio obligations remain unaccepted.
 
 ## User Flow Coverage
 
@@ -129,7 +127,7 @@ Roadmap criteria are kept verbatim in rows 1–4. Plan restatements are merged i
 | 9 | An empty stream, fewer than the required warmup frames, or samples without accepted positions produces no automatic cue. | VERIFIED | Exactly-five `Window` initializer; warmup returns no sample batch; apex rejects absent/low-confidence positions. Real-grid warmup test asserts zero predictions through four frames, no cue after missing-position fifth frame, and fresh warmup after reset. 01-02 truth 5. |
 | 10 | Duplicate and out-of-order frame identities never replay consumed cue evidence, including after temporal history pruning; accepted evidence retains chronological order. | VERIFIED | `isNew` requires increasing sequence and rational source time within an explicitly authorized domain. Passing pruned-history replay/reversal and equal-time/older-sequence tests leave consumed/evaluated/emitted counts unchanged. 01-02 truth 6. |
 | 11 | The bundled five-frame model contract, FP16 values, independent output strides, temporal order and portrait-fit/nonportrait-fill source coordinates remain correct after refactoring. | VERIFIED | `GridTrackNetDecoder.swift:6–68` validates each tensor inside scoped bytes; production f1…f5 mapping is oldest→newest. Six decoder tests pass, including independent padded axes, malformed layouts, rotated pixel quadrants, hand-calculated geometry and actual bundled-model smoke. Observed heads are FP16 `[1,5,48,27]`, strides `[7680,1536,32,1]`; assets unchanged. 01-03 truth 2. |
-| 12 | The validation record reports measured results, missing empirical evidence and final ownership bounds separately; deterministic success does not establish clip accuracy or physical beep timing. | VERIFIED as document content | Validation ledger contains actual test commands/counts, scoped owner counts and explicit pending media/device/audio entries. Direct result-bundle inspection agrees. The separate prohibition remains unverified pending human review; document presence/content does not resolve it. 01-03 truth 4. |
+| 12 | The validation record reports measured results, missing empirical evidence and final ownership bounds separately; deterministic success does not establish clip accuracy or physical beep timing. | VERIFIED | Validation ledger contains actual test commands/counts, scoped owner counts and explicit pending media/device/audio entries. Direct result-bundle inspection agrees. The user separately accepted the evidence limits in UAT test 1. 01-03 truth 4. |
 
 **Score:** 12/12 truths verified; **0** present-but-behavior-unverified truths. No overrides. No coincidental-reliance item identified: production establishes admission, identity and sequencing; fixtures supply supported boundary inputs rather than establishing an otherwise absent production precondition.
 
@@ -148,7 +146,7 @@ Canonical `verify.artifacts` returned 4/4, 4/4 and 3/3 for the three plans (10 u
 | `Tests/PoseDetectionManagerTests.swift` | Same-image pose and serialization | VERIFIED | 4 executed tests, including clearing absent results and 100 concurrent extraction calls. |
 | `Tests/AnalysisAssociationTests.swift` | Candidate pose and complete adapters | VERIFIED | 10 executed tests; both complete adapters and positive/negative mismatch fallback cases. |
 | `Tests/GridTrackNetDecoderTests.swift` | Independent oracle and model smoke | VERIFIED | 6 executed tests; explicit tensor storage, hand-calculated expected points, actual model invocation. |
-| `docs/references/toss-cue-validation.md` | Baseline, resource ledger and handoff | VERIFIED | Pre-change protocol preserved; executable evidence mapped; referenced from architecture and reference index. Human claims review pending. |
+| `docs/references/toss-cue-validation.md` | Baseline, resource ledger and handoff | VERIFIED | Pre-change protocol preserved; executable evidence mapped; referenced from architecture and reference index. Human claims review passed in 01-UAT.md. |
 
 `CameraManager`, `VideoPlayerManager`, `PoseDetectionManager`, color fallback and the changed apex tests were inspected as supporting artifacts. Empty pose, optional positions, empty initial rings, and injected no-op defaults are valid state/seams: production supplies real services and populates outputs. No stub or orphan was found.
 
@@ -243,11 +241,11 @@ Disconfirmation checks: (1) Real-world sampling sufficiency and accuracy are onl
 
 No unreferenced `TBD`, `FIXME` or `XXX` marker, placeholder, disabled test, unpopulated output or new production payload log was found in changed implementation/tests/validation. `git diff --check` passes. Existing model assets match baseline hashes. Color fallback uses captured shoulder value and does not emit automatic apex samples; target/bundle/deployment settings and manual beep wiring are preserved.
 
-### Prohibitions, Unresolved Edges and Assumptions
+### Prohibitions, Edge Decisions and Assumptions
 
-**WARNING — unverified-prohibition — human review recommended.** 01-03's exact transparency prohibition has `status: unresolved` and no `verification`/enforcement descriptor. It is accepted and retained as flagged, not assigned an invented test tier or silently approved. **NON-AUTHORITATIVE LLM judgment:** the inspected ledger and reports consistently distinguish synthetic callback/ownership evidence from real toss accuracy and sound onset. Human resolution is still required.
+**Transparency prohibition resolved by human review.** The original plan carried an unresolved prohibition without an enforcement descriptor. UAT test 1 explicitly presented the scoped eight/sixteen-buffer evidence and unmeasured clip/device/process-memory/audio limits; the user replied `pass`. This supplies the required human judgment. No automated enforcement descriptor or new empirical result is claimed.
 
-**WARNING — EDGE-CUE-01 and EDGE-CUE-04 remain unclassified/unresolved.** Their explicit manual contracts have strong passing association and fallback tests. No truth is tagged `verification: backstop` in these plans; I do not invent that descriptor or downgrade inferable tested truths. The original unresolved probe items remain separate human decision items because their missing classification cannot be reconstructed from test success. Held-out checks are appropriate if classification reveals an additional obligation.
+**EDGE-CUE-01 and EDGE-CUE-04 explicitly resolved by the user.** UAT tests 2 and 3 presented the original-five-frame association and exact-identity pose-or-fallback contracts. The user replied `pass` to each with no additional case requested. Those accepted contracts have passing deterministic tests. The original undefined probes were not executed or retroactively assigned a backstop descriptor; their ambiguity is closed by explicit human resolution.
 
 | Assumption | Disposition |
 |---|---|
@@ -263,17 +261,19 @@ No unreferenced `TBD`, `FIXME` or `XXX` marker, placeholder, disabled test, unpo
 | Visible AV-layer overlay placement | Phase 3 | SC1–3 require source-to-display transforms and real layer/layout checks. |
 | Permitted labeled clips, actual cadence/accuracy, sustained device/process memory and physical sound timing | Phase 4 | SC2–5 require corpus, frozen criteria, real-device/audio evidence and outstanding-check accounting. |
 
-These explicit later-phase obligations are not Phase 1 implementation gaps. They remain unaccepted and do not erase the Phase 1 human items below.
+These explicit later-phase obligations are not Phase 1 implementation gaps. They remain unaccepted after the completed Phase 1 human review below.
 
-### Human Verification Required
+### Human Verification Completed
 
-1. **Evidence ledger and transparency prohibition.** Review `docs/references/toss-cue-validation.md`, the source/model hashes and the recorded test bundle. Expect only the scoped deterministic claims to be accepted, with missing clips/devices/process-memory/audio evidence retained. Record an explicit decision on the prohibition. This is the deferred `01-03-PLAN.md` human-check; an LLM cannot approve its own reliability claims.
-2. **EDGE-CUE-01 classification.** Review the exact-frame/pixel/time/geometry association obligation and the held-prediction/source-mutation tests. Confirm the intended edge contract or supply a held-out predicate. Expect no claim that an unclassified probe passed merely because its manually specified tests passed.
-3. **EDGE-CUE-04 classification.** Review exact pose identity and the strict fallback, including 0.71 versus 0.69/0.70 outcomes. Confirm the intended contract or define the missing edge check. Expect mismatched pose to become missing without rejecting valid frame metadata.
+1. **Evidence ledger and transparency prohibition — pass, 13:27:51 UTC.** User accepted the stated evidence limits; missing empirical measurements remain required.
+2. **EDGE-CUE-01 — pass, 13:29:18 UTC.** User confirmed preservation of the original five images, times and mappings despite newer input or source-buffer reuse.
+3. **EDGE-CUE-04 — pass, 13:39:03 UTC.** User confirmed exact source/session/frame pose association and strict missing-pose fallback above 0.70, with other cue conditions satisfied.
+
+All responses were recorded verbatim as `pass` in `01-UAT.md` on 2026-09-26. These were evidence and intended-behavior reviews, not new device trials.
 
 ### Gaps Summary
 
-No deterministic implementation gap or production BLOCKER was established. All 12 merged truths, 10 unique declared artifacts, 8 key links, and 4 phase requirements have substantive evidence. The final status is **human_needed**, because the required human review and unresolved flags prevent an unconditional `passed` verdict. No commit or production/test/tracking edit was made by this verifier.
+No deterministic implementation gap or production BLOCKER was established. All 12 merged truths, 10 unique declared artifacts, 8 key links, and 4 phase requirements have substantive evidence. All three human reviews passed with zero issues. The verify-work orchestrator canonicalized this report to **passed** using those explicit responses; source and test evidence remain unchanged.
 
 Fingerprint fields above are copied from `gsd_run query verification.fingerprint` with every phase PLAN/SUMMARY, the mapped requirements, all changed implementation/tests, and supporting evidence files explicitly supplied. No nested or superseded plans were present. Future changes to covered files require fingerprint refresh/reverification as appropriate.
 
@@ -281,4 +281,4 @@ Fingerprint fields above are copied from `gsd_run query verification.fingerprint
 
 _Verifier: gsd-verifier_
 
-UAT resume note — 2026-09-26: The API-coverage precheck initially misread the source-coverage document as an empty API matrix. Added the supported, reasoned no-external-integration declaration to `01-COVERAGE.md`; the gate then passed. No app, test, requirement or human-review outcome changed. The covered-input fingerprint was refreshed for that clarification and its learning entry; all three human items remain pending.
+UAT resume note — 2026-09-26: The API-coverage precheck initially misread the source-coverage document as an empty API matrix. Added the supported, reasoned no-external-integration declaration to `01-COVERAGE.md`; the gate then passed. This documentation clarification preceded the three user passes recorded above.

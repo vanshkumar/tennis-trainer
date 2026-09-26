@@ -11,10 +11,10 @@ Here, v1 means the first GSD reliability milestone in this existing application.
 
 ### Current-Toss Feedback
 
-- [ ] **CUE-01**: A player's ball result and apex cue use the same source frames, timestamps, and geometry that produced the prediction.
-- [ ] **CUE-02**: A player can use analysis without an accumulating backlog of old feedback; processing has a tested finite work/buffer bound.
-- [ ] **CUE-03**: A player receives at most one automatic cue for an eligible toss, even when source frames repeat or inference windows overlap.
-- [ ] **CUE-04**: A player's toss height gate uses pose associated with that toss sample, or the documented fallback when valid pose is unavailable.
+- [x] **CUE-01**: A player's ball result and apex cue use the same source frames, timestamps, and geometry that produced the prediction.
+- [x] **CUE-02**: A player can use analysis without an accumulating backlog of old feedback; processing has a tested finite work/buffer bound.
+- [x] **CUE-03**: A player receives at most one automatic cue for an eligible toss, even when source frames repeat or inference windows overlap.
+- [x] **CUE-04**: A player's toss height gate uses pose associated with that toss sample, or the documented fallback when valid pose is unavailable.
 
 ### Session Transitions
 
@@ -84,10 +84,10 @@ Each v1 requirement maps to exactly one owning phase in the approved roadmap; ot
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CUE-01 | Phase 1 | Pending |
-| CUE-02 | Phase 1 | Pending |
-| CUE-03 | Phase 1 | Pending |
-| CUE-04 | Phase 1 | Pending |
+| CUE-01 | Phase 1 | Complete |
+| CUE-02 | Phase 1 | Complete |
+| CUE-03 | Phase 1 | Complete |
+| CUE-04 | Phase 1 | Complete |
 | LIFE-01 | Phase 2 | Pending |
 | LIFE-02 | Phase 2 | Pending |
 | VIEW-01 | Phase 3 | Pending |
@@ -103,6 +103,7 @@ Each v1 requirement maps to exactly one owning phase in the approved roadmap; ot
 | CHECK-03 | Phase 4 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 17 total
 - Mapped to phases: 17
 - Unmapped: 0
@@ -115,4 +116,4 @@ Each v1 requirement maps to exactly one owning phase in the approved roadmap; ot
 
 ---
 *Requirements defined: 2026-09-24*
-*Last updated: 2026-09-25 after approval of all 17 requirements and their roadmap mappings*
+*Last updated: 2026-09-26 after CUE-01 through CUE-04 passed Phase 1 verification and human UAT*
