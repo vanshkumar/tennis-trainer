@@ -4,6 +4,25 @@ import CoreML
 @testable import Tennis_Trainer
 
 final class BallDetectionManagerTests: XCTestCase {
+  func testExpectedGenerationRejectsAcquiredInput_WithoutPoseOrLease() throws {
+    var poses = 0
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+      .init(samples: nil, position: nil)
+    }, extractPose: { _, identity in
+      poses += 1
+      return .init(identity: identity, joints: [:])
+    }, worker: { $0() }, publication: { $0() }))
+    let old = manager.admissionGeneration
+    manager.resetTrackingState()
+    let input = input(try pixels(), 0, source: UUID())
+    XCTAssertFalse(manager.process(input: input, expectedGeneration: old))
+    XCTAssertEqual(poses, 0)
+    XCTAssertEqual(manager.diagnostics.admitted, 0)
+    XCTAssertEqual(manager.diagnostics.currentLeases, 0)
+    XCTAssertTrue(manager.process(input: input, expectedGeneration: manager.admissionGeneration))
+    XCTAssertEqual(poses, 1)
+  }
+
   func testUniqueBufferBound_WhenTwoManagersHoldPreparationPredictionAndPublication() throws {
     for resetDuringPrediction in [false, true] {
       let ledger = BufferLedger()

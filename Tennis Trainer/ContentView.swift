@@ -168,8 +168,8 @@ struct ContentView: View {
                     Spacer()
                     
                     HStack {
-                        Button(cameraManager.isRecording ? "Stop" : "Start") {
-                            if cameraManager.isRecording {
+                        Button(cameraManager.captureRequested ? "Stop" : "Start") {
+                            if cameraManager.captureRequested {
                                 cameraManager.stopCapture()
                                 frameCount = 0
                                 fps = 0
@@ -180,7 +180,7 @@ struct ContentView: View {
                             }
                         }
                         .padding()
-                        .background(cameraManager.isRecording ? Color.red : Color.green)
+                        .background(cameraManager.captureRequested ? Color.red : Color.green)
                         .foregroundColor(.white)
                         .clipShape(Circle())
                         

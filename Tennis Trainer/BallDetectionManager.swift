@@ -177,9 +177,10 @@ final class BallDetectionManager: ObservableObject {
   }
 
   @discardableResult
-  func process(input: Input) -> Bool {
+  func process(input: Input, expectedGeneration: UUID? = nil) -> Bool {
     state.lock.lock()
-    guard state.lease == nil, input.sourceTime.isValid, input.sourceTime.isNumeric,
+    guard expectedGeneration == nil || expectedGeneration == state.generation,
+          state.lease == nil, input.sourceTime.isValid, input.sourceTime.isNumeric,
           CMTimeGetSeconds(input.sourceTime).isFinite,
           state.sourceID == nil || state.sourceID == input.sourceID,
           state.lastTime.map({ CMTimeCompare(input.sourceTime, $0) > 0 }) ?? true,
@@ -225,6 +226,12 @@ final class BallDetectionManager: ObservableObject {
       }
     }
     return true
+  }
+
+  var admissionGeneration: UUID {
+    state.lock.lock()
+    defer { state.lock.unlock() }
+    return state.generation
   }
 
   private func publish(_ result: Analysis?, pose: PoseDetectionManager.FramePose, lease: Lease) {

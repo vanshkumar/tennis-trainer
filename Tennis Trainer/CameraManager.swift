@@ -2,17 +2,31 @@ import AVFoundation
 import SwiftUI
 import Vision
 
-class CameraManager: NSObject, ObservableObject {
+final class CameraManager: NSObject, ObservableObject {
+    struct Dependencies {
+      var session: (@escaping () -> Void) -> Void
+      var drain: (@escaping () -> Void) -> Void
+      var state: (@escaping () -> Void) -> Void
+      var stop: () -> Void
+      var attach: (Bool) -> Void
+      var start: () -> Bool
+      var beforeAdmission: () -> Void = {}
+    }
+
     @Published var isRecording = false
+    @Published private(set) var captureRequested = false
     @Published var hasPermission = false
     
-    private let captureSession = AVCaptureSession()
-    private var videoOutput = AVCaptureVideoDataOutput()
+    private lazy var captureSession = AVCaptureSession()
+    private lazy var videoOutput = AVCaptureVideoDataOutput()
     // Keep session lifecycle work responsive even when frame analysis is expensive.
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
     private let videoProcessingQueue = DispatchQueue(label: "camera.video.processing.queue", qos: .userInitiated)
     private let frameProcessingLock = NSLock()
-    private var frameProcessingEnabled = false
+    private var operation = UUID()
+    private var ingressGeneration: UUID?
+    private var contextActive = true
+    private var dependencies: Dependencies!
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
     var poseDetectionManager: PoseDetectionManager?
@@ -21,10 +35,36 @@ class CameraManager: NSObject, ObservableObject {
     var onApex: (() -> Void)?
     private let sourceID = UUID()
     
-    override init() {
+    override convenience init() {
+        self.init(dependencies: nil)
+    }
+
+    init(dependencies: Dependencies?) {
         super.init()
-        guard !AppRuntime.isRunningTests else { return }
-        checkPermissions()
+        if let dependencies {
+          self.dependencies = dependencies
+        } else if AppRuntime.isRunningTests {
+          self.dependencies = Dependencies(session: { $0() }, drain: { $0() }, state: { $0() },
+            stop: {}, attach: { _ in }, start: { false })
+        } else {
+          self.dependencies = Dependencies(
+            session: { [weak self] in self?.sessionQueue.async(execute: $0) },
+            drain: { [weak self] in self?.videoProcessingQueue.async(execute: $0) },
+            state: { DispatchQueue.main.async(execute: $0) },
+            stop: { [weak self] in
+              guard let self else { return }
+              if self.captureSession.isRunning { self.captureSession.stopRunning() }
+            }, attach: { [weak self] attached in
+              guard let self else { return }
+              self.videoOutput.setSampleBufferDelegate(attached ? self : nil,
+                queue: attached ? self.videoProcessingQueue : nil)
+            }, start: { [weak self] in
+              guard let self, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return false }
+              if !self.captureSession.isRunning { self.captureSession.startRunning() }
+              return self.captureSession.isRunning
+            })
+          checkPermissions()
+        }
     }
     
     private func checkPermissions() {
@@ -126,31 +166,59 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     func startCapture() {
-        guard !AppRuntime.isRunningTests else { return }
-        setFrameProcessingEnabled(true)
-        DispatchQueue.main.async {
-            self.isRecording = true
-        }
+      guard contextActive, !captureRequested else { return }
+      captureRequested = true
+      let current = UUID()
+      frameProcessingLock.lock()
+      operation = current
+      ingressGeneration = nil
+      frameProcessingLock.unlock()
+      ballDetectionManager?.resetTrackingState()
 
-        sessionQueue.async {
-            if !self.captureSession.isRunning {
-                self.captureSession.startRunning()
+      // Stop and detach on the AV owner BEFORE draining the serial callback queue.
+      // Reopening a Boolean before this boundary would retag queued old buffers.
+      dependencies.session { [weak self] in
+        guard let self else { return }
+        self.dependencies.stop()
+        self.dependencies.attach(false)
+        self.dependencies.drain { [weak self] in
+          guard let self else { return }
+          self.dependencies.session { [weak self] in
+            guard let self, self.isCurrentOperation(current) else { return }
+            self.dependencies.attach(true)
+            let running = self.dependencies.start()
+            self.dependencies.state { [weak self] in
+              guard let self, self.isCurrentOperation(current) else { return }
+              self.isRecording = running
+              let generation = self.ballDetectionManager?.admissionGeneration
+              self.frameProcessingLock.lock()
+              if self.operation == current {
+                self.ingressGeneration = running ? generation : nil
+              }
+              self.frameProcessingLock.unlock()
             }
+          }
         }
+      }
     }
     
     func stopCapture() {
-        guard !AppRuntime.isRunningTests else { return }
-        setFrameProcessingEnabled(false)
-        DispatchQueue.main.async {
-            self.isRecording = false
-        }
+      frameProcessingLock.lock()
+      operation = UUID()
+      ingressGeneration = nil
+      frameProcessingLock.unlock()
+      ballDetectionManager?.resetTrackingState()
+      captureRequested = false
+      isRecording = false
+      dependencies.session { [weak self] in
+        self?.dependencies.stop()
+        self?.dependencies.attach(false)
+      }
+    }
 
-        sessionQueue.async {
-            if self.captureSession.isRunning {
-                self.captureSession.stopRunning()
-            }
-        }
+    func setContextActive(_ active: Bool) {
+      contextActive = active
+      if !active { stopCapture() }
     }
     
     func getPreviewLayer() -> AVCaptureVideoPreviewLayer {
@@ -161,32 +229,34 @@ class CameraManager: NSObject, ObservableObject {
         return previewLayer!
     }
 
-    private func setFrameProcessingEnabled(_ enabled: Bool) {
-        frameProcessingLock.lock()
-        defer { frameProcessingLock.unlock() }
-        frameProcessingEnabled = enabled
-    }
-
-    private func canProcessFrame() -> Bool {
-        frameProcessingLock.lock()
-        defer { frameProcessingLock.unlock() }
-        let enabled = frameProcessingEnabled
-        return enabled
+    private func isCurrentOperation(_ token: UUID) -> Bool {
+      frameProcessingLock.lock()
+      defer { frameProcessingLock.unlock() }
+      return operation == token
     }
 }
 
 extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard canProcessFrame() else { return }
-        submitSampleBuffer(sampleBuffer)
+        receiveSampleBuffer(sampleBuffer)
+    }
+
+    // Shared production ingress; tests inject AV delivery at this boundary.
+    func receiveSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+      frameProcessingLock.lock()
+      let generation = ingressGeneration
+      frameProcessingLock.unlock()
+      guard let generation else { return }
+      dependencies.beforeAdmission()
+      submitSampleBuffer(sampleBuffer, expectedGeneration: generation)
     }
     
-    func submitSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    func submitSampleBuffer(_ sampleBuffer: CMSampleBuffer, expectedGeneration: UUID? = nil) {
         let time = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         guard let pixels = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         ballDetectionManager?.process(input: .init(
             pixelBuffer: pixels, sourceTime: time, orientation: .right, sourceID: sourceID
-        ))
+        ), expectedGeneration: expectedGeneration)
     }
 }
 
@@ -194,6 +264,7 @@ extension CameraManager: AVCaptureVideoDataOutputSampleBufferDelegate {
 extension CameraManager {
     func setupBallDetection(with pose: PoseDetectionManager,
                             factory: ((PoseDetectionManager) -> BallDetectionManager)? = nil) {
+        guard ballDetectionManager == nil else { return }
         guard factory != nil || !AppRuntime.isRunningTests else {
             self.ballDetectionManager = nil
             return
