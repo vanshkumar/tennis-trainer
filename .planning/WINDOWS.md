@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 3
+open_count: 4
 waived_count: 0
 fixed_count: 1
-total_count: 4
-last_updated: 2026-09-26T15:44:12.156Z
+total_count: 5
+last_updated: 2026-09-26T16:03:47.403Z
 ---
 
 # Broken Windows Ledger
@@ -19,6 +19,7 @@ last_updated: 2026-09-26T15:44:12.156Z
 | 2 | 02 | stub | Tennis Trainer/ContentView.swift | 209 | Inherited Request Permission action is empty; scheduled for plan 02-02. | fixed |  | 2026-09-26T14:59:53.671Z | 2026-09-26T15:11:59.755Z |
 | 3 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera permission request, Settings grant/revoke return, and supported restriction checks remain pending; user deferred to end of Phase 2. | open |  | 2026-09-26T15:44:12.034Z |  |
 | 4 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera startup, Stop, interruption and return/retry checks remain pending; injected events are not hardware evidence. | open |  | 2026-09-26T15:44:12.156Z |  |
+| 5 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-03-PLAN.md |  | Real local-media end, repeated scrubbing, Pause during seek and Replay inspection deferred by user to Phase 2 end; no clip accuracy or physical audio evidence. | open |  | 2026-09-26T16:03:47.403Z |  |
 
 ````json
 [
@@ -71,6 +72,19 @@ last_updated: 2026-09-26T15:44:12.156Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-26T15:44:12.156Z",
+    "resolved_at": null,
+    "milestone": null
+  },
+  {
+    "id": 5,
+    "kind": "unrun-verify",
+    "phase": "02",
+    "file": ".planning/phases/02-dependable-practice-controls/02-03-PLAN.md",
+    "line": null,
+    "description": "Real local-media end, repeated scrubbing, Pause during seek and Replay inspection deferred by user to Phase 2 end; no clip accuracy or physical audio evidence.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T16:03:47.403Z",
     "resolved_at": null,
     "milestone": null
   }
