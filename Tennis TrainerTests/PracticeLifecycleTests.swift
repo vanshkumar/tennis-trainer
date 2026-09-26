@@ -3,6 +3,21 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testPauseInvalidatesHeldPlaybackPublication() throws {
+    let pipeline = LifecyclePipeline()
+    let player = VideoPlayerManager()
+    player.setupBallDetection(with: pipeline.pose, factory: { _ in pipeline.manager })
+    var frames = 0
+    player.onFrameProcessed = { frames += 1 }
+    let output = try LifecycleOutput()
+    player.processCurrentFrame(output: output, requestedTime: .zero, orientation: .up)
+    pipeline.worker.drain()
+    player.pause()
+    pipeline.publication.drain()
+    XCTAssertEqual(frames, 0, "Pause must invalidate held frame effects")
+    XCTAssertTrue(pipeline.pose.detectedPose.isEmpty, "Pause must invalidate held pose effects")
+  }
+
   func testStopInvalidatesHeldPublication_BeforePhysicalTeardown() throws {
     try assertCameraStop(holdPublication: true)
   }
@@ -187,6 +202,19 @@ private final class LifecycleScheduler {
   func enqueue(_ job: @escaping () -> Void) { jobs.append(job) }
   func run() { if !jobs.isEmpty { jobs.removeFirst()() } }
   func drain() { while !jobs.isEmpty { run() } }
+}
+
+private final class LifecycleOutput: VideoPlayerManager.FrameOutputReading {
+  let pixels: CVPixelBuffer
+  var time = CMTime(value: 10033, timescale: 1000)
+  var beforeReturn: (() -> Void)?
+  init() throws { pixels = try AnalysisFixture.pixels() }
+  func hasNewPixelBuffer(forItemTime: CMTime) -> Bool { true }
+  func copyFrame(forItemTime: CMTime) -> (CVPixelBuffer, CMTime)? {
+    let acquired = time
+    beforeReturn?()
+    return (pixels, acquired)
+  }
 }
 
 private enum LifecycleFixture {
