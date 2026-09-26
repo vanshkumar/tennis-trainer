@@ -9,6 +9,32 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
     @MainActor
+    func testPlaybackSeekControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-seek"]
+        app.launch()
+        app.buttons["Video Playback"].tap()
+        let action = app.buttons["playback.action"]
+        let status = app.staticTexts["playback.status"]
+        let slider = app.sliders["playback.slider"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        action.tap()
+        assertLabel(status, "Playing")
+        slider.adjust(toNormalizedSliderPosition: 0.5)
+        assertLabel(status, "Seeking…")
+        XCTAssertEqual(action.label, "Pause")
+        action.tap()
+        XCTAssertEqual(action.label, "Play")
+        assertLabel(status, "Paused")
+        XCTAssertNotEqual(app.staticTexts["playback.position"].label, "0:00")
+        slider.adjust(toNormalizedSliderPosition: 0.75)
+        assertLabel(status, "Seeking…")
+        action.tap()
+        XCTAssertEqual(action.label, "Pause")
+        assertLabel(status, "Playing")
+    }
+
+    @MainActor
     func testCameraStopDuringStartupAndRecovery() throws {
         let app = XCUIApplication()
         for scenario in ["capture-startup", "capture-recovery"] {

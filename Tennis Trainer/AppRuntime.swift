@@ -13,7 +13,7 @@ enum AppRuntime {
             arguments.indices.contains(index + 1) else { return nil }
       let name = arguments[index + 1]
       return ["permission-undetermined", "permission-denied-return", "permission-restricted",
-              "capture-startup", "capture-recovery", "capture-failure"]
+              "capture-startup", "capture-recovery", "capture-failure", "playback-seek"]
         .contains(name) ? name : nil
       #else
       return nil
@@ -66,7 +66,28 @@ enum AppRuntime {
       return CameraManager()
     }
 
+    static func makeVideoPlayerManager() -> VideoPlayerManager {
+      #if DEBUG
+      if practiceUIScenario == "playback-seek" {
+        let effects = PlaybackScenarioEffects()
+        let manager = VideoPlayerManager(dependencies: .init(play: { true }, pause: {},
+          startLoop: {}, stopLoop: {}, seek: { target, completion in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+              effects.position = target
+              completion(true)
+            }
+          }, currentTime: { effects.position }))
+        manager.loadVideo(from: URL(fileURLWithPath: "/scripted-playback.mov"))
+        return manager
+      }
+      #endif
+      return VideoPlayerManager()
+    }
+
     #if DEBUG
+    private final class PlaybackScenarioEffects {
+      var position = CMTime.zero
+    }
     private final class CameraScenarioEffects {
       var authorization: AVAuthorizationStatus
       weak var camera: CameraManager?

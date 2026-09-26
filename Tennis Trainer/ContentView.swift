@@ -18,7 +18,7 @@ struct ContentView: View {
     @StateObject private var audioManager = AudioManager()
     @StateObject private var cameraPoseManager = PoseDetectionManager()
     @StateObject private var playbackPoseManager = PoseDetectionManager()
-    @StateObject private var videoPlayerManager = VideoPlayerManager()
+    @StateObject private var videoPlayerManager = AppRuntime.makeVideoPlayerManager()
     @Environment(\.scenePhase) private var scenePhase
     @State private var frameCount = 0
     @State private var lastFrameTime = Date()
@@ -247,14 +247,17 @@ struct ContentView: View {
                         .padding()
                     Spacer()
                 }
-            } else if let _ = selectedVideoURL,
-                      let playerLayer = videoPlayerManager.getPlayerLayer() {
+            } else if videoPlayerManager.duration > 0 {
                 
                 // Video player with controls
                 VStack(spacing: 0) {
                     // Video display area with joint overlays
                     ZStack {
-                        VideoPlayerView(playerLayer: playerLayer)
+                        Group {
+                            if let playerLayer = videoPlayerManager.getPlayerLayer() {
+                                VideoPlayerView(playerLayer: playerLayer)
+                            } else { Color.black }
+                        }
                             .aspectRatio(16/9, contentMode: .fit)
                             .background(Color.black)
                         
@@ -286,6 +289,9 @@ struct ContentView: View {
                     
                     // Video controls
                     VStack(spacing: 8) {
+                        Text(videoPlayerManager.playbackState.label)
+                            .foregroundColor(.white)
+                            .accessibilityIdentifier("playback.status")
                         // FPS and info display
                         HStack {
                             VStack(alignment: .leading) {
@@ -309,6 +315,7 @@ struct ContentView: View {
                         if videoPlayerManager.duration > 0 {
                             HStack {
                                 Text(formatTime(videoPlayerManager.currentTime))
+                                    .accessibilityIdentifier("playback.position")
                                     .font(.caption)
                                     .foregroundColor(.white)
                                     .monospaced()
@@ -320,6 +327,7 @@ struct ContentView: View {
                                     }
                                 ), in: 0...max(videoPlayerManager.duration, 1))
                                 .accentColor(.white)
+                                .accessibilityIdentifier("playback.slider")
                                 
                                 Text(formatTime(videoPlayerManager.duration))
                                     .font(.caption)
@@ -331,8 +339,8 @@ struct ContentView: View {
                         
                         // Play/pause and other controls
                         HStack(spacing: 20) {
-                            Button(videoPlayerManager.isPlaying ? "Pause" : "Play") {
-                                if videoPlayerManager.isPlaying {
+                            Button(videoPlayerManager.playRequested ? "Pause" : "Play") {
+                                if videoPlayerManager.playRequested {
                                     videoPlayerManager.pause()
                                 } else {
                                     // Refresh connection before playing
@@ -340,8 +348,9 @@ struct ContentView: View {
                                     videoPlayerManager.play()
                                 }
                             }
+                            .accessibilityIdentifier("playback.action")
                             .padding()
-                            .background(videoPlayerManager.isPlaying ? Color.orange : Color.green)
+                            .background(videoPlayerManager.playRequested ? Color.orange : Color.green)
                             .foregroundColor(.white)
                             .clipShape(Circle())
                             

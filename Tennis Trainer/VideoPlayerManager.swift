@@ -9,6 +9,42 @@ final class VideoPlayerManager: ObservableObject {
       var pause: () -> Void
       var startLoop: () -> Void
       var stopLoop: () -> Void
+      var load: (URL) -> Double? = { _ in 30 }
+      var seek: (CMTime, @escaping (Bool) -> Void) -> Void = { _, _ in }
+      var cancelSeeks: () -> Void = {}
+      var currentTime: () -> CMTime = { .zero }
+      var state: (@escaping () -> Void) -> Void = { $0() }
+      var observeTicks: ((@escaping () -> Void) -> (() -> Void))? = nil
+      var observeTime: ((@escaping (CMTime) -> Void) -> (() -> Void))? = nil
+      var frameOutput: (() -> FrameOutputReading)? = nil
+    }
+    enum PlaybackState: Equatable {
+      case empty, paused, seeking, playing, failed(String)
+      var label: String {
+        switch self {
+        case .empty: return "No video"
+        case .paused: return "Paused"
+        case .seeking: return "Seeking…"
+        case .playing: return "Playing"
+        case .failed(let message): return message
+        }
+      }
+    }
+    @Published private(set) var playbackState: PlaybackState = .empty
+    @Published private(set) var playRequested = false
+    private var loadID = UUID()
+    private var seekID: UUID?
+    private var failedSeekTarget: Double?
+    private var hasLoadedItem = false
+    private var retireTicks: (() -> Void)?
+    private var retireTime: (() -> Void)?
+    private var displayTarget: DisplayTarget?
+
+    private final class DisplayTarget: NSObject {
+      weak var owner: VideoPlayerManager?
+      let run: UUID
+      init(owner: VideoPlayerManager, run: UUID) { self.owner = owner; self.run = run }
+      @objc func tick() { owner?.processDisplayLinkFrame(run: run) }
     }
     private let dependencies: Dependencies?
     private var contextActive = true
@@ -59,12 +95,22 @@ final class VideoPlayerManager: ObservableObject {
     var onApex: (() -> Void)?
     
     func loadVideo(from url: URL) {
-        isLoading = true
-        
         // Clean up previous player
         cleanup()
+        let load = loadID
+        isLoading = true
         sourceID = UUID()
         ballDetectionManager?.resetTrackingState(sourceID: sourceID)
+        if let dependencies {
+          if let seconds = dependencies.load(url), seconds.isFinite, seconds > 0 {
+            duration = seconds
+            hasLoadedItem = true
+            playbackState = .paused
+            setupTimeObserver()
+          } else { playbackState = .failed("Video could not load") }
+          isLoading = false
+          return
+        }
         
         let asset = AVAsset(url: url)
         playerItem = AVPlayerItem(asset: asset)
@@ -85,18 +131,22 @@ final class VideoPlayerManager: ObservableObject {
                 let isPlayable = try await asset.load(.isPlayable)
                 
                 await MainActor.run {
-                    self.duration = CMTimeGetSeconds(duration)
+                    guard self.loadID == load else { return }
+                    let seconds = CMTimeGetSeconds(duration)
                     self.isLoading = false
-                    
-                    // Ensure we start from the beginning
-                    if let player = self.player {
-                        player.seek(to: .zero)
-                        self.currentTime = 0
+                    guard isPlayable, seconds.isFinite, seconds > 0 else {
+                      self.playbackState = .failed("Video could not load")
+                      return
                     }
+                    self.duration = seconds
+                    self.hasLoadedItem = true
+                    self.playbackState = .paused
                 }
             } catch {
                 await MainActor.run {
+                    guard self.loadID == load else { return }
                     self.isLoading = false
+                    self.playbackState = .failed("Video could not load")
                 }
             }
         }
@@ -117,21 +167,36 @@ final class VideoPlayerManager: ObservableObject {
     private func startFrameProcessing() {
         guard !loopActive else { return }
         loopActive = true
-        if let dependencies { dependencies.startLoop(); return }
-        displayLink = CADisplayLink(target: self, selector: #selector(processDisplayLinkFrame))
+        let run = frameRun
+        if let dependencies {
+          dependencies.startLoop()
+          retireTicks = dependencies.observeTicks? { [weak self] in self?.processDisplayLinkFrame(run: run) }
+          return
+        }
+        let target = DisplayTarget(owner: self, run: run)
+        displayTarget = target
+        displayLink = CADisplayLink(target: target, selector: #selector(DisplayTarget.tick))
         displayLink?.add(to: .main, forMode: .common)
     }
     
     private func stopFrameProcessing() {
         guard loopActive else { return }
         loopActive = false
+        retireTicks?()
+        retireTicks = nil
         if let dependencies { dependencies.stopLoop(); return }
         displayLink?.invalidate()
         displayLink = nil
+        displayTarget = nil
     }
     
-    @objc private func processDisplayLinkFrame() {
-        guard let videoOutput = videoOutput,
+    private func processDisplayLinkFrame(run: UUID) {
+        if let dependencies, let output = dependencies.frameOutput?() {
+          guard run == frameRun, loopActive else { return }
+          processPlaybackFrame(output: output, requestedTime: dependencies.currentTime(), orientation: .up)
+          return
+        }
+        guard run == frameRun, loopActive, let videoOutput = videoOutput,
               let player = player,
               isPlaying else {
             return
@@ -190,14 +255,45 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     private func setupTimeObserver() {
-        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
-            self?.currentTime = CMTimeGetSeconds(time)
+        let load = loadID
+        let accept: (CMTime) -> Void = { [weak self] _ in
+          guard let self else { return }
+          self.deliverState { [weak self] in
+            guard let self, self.loadID == load, self.seekID == nil else { return }
+            // A delayed periodic callback is only a signal; read the owned backend now.
+            if let seconds = self.finitePosition() { self.currentTime = seconds }
+          }
         }
+        if let dependencies {
+          retireTime = dependencies.observeTime?(accept)
+          return
+        }
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserver = player?.addPeriodicTimeObserver(forInterval: interval, queue: .main, using: accept)
+    }
+
+    private func deliverState(_ job: @escaping () -> Void) {
+      if let dependencies { dependencies.state(job) }
+      else { DispatchQueue.main.async(execute: job) }
+    }
+
+    private func finitePosition() -> Double? {
+      let time = dependencies?.currentTime() ?? player?.currentTime() ?? .invalid
+      let seconds = CMTimeGetSeconds(time)
+      guard time.isValid, time.isNumeric, seconds.isFinite, duration.isFinite, duration > 0 else { return nil }
+      return min(max(seconds, 0), duration)
     }
     
     func play() {
-        guard contextActive, !isPlaying else { return }
+        guard contextActive, hasLoadedItem, !isPlaying else { return }
+        playRequested = true
+        guard seekID == nil else { return }
+        if let target = failedSeekTarget { seek(to: target); return }
+        beginPlayback()
+    }
+
+    private func beginPlayback() {
+        guard contextActive, playRequested, seekID == nil, hasLoadedItem, !isPlaying else { return }
         if let dependencies {
           guard dependencies.play() else { return }
         } else {
@@ -213,10 +309,17 @@ final class VideoPlayerManager: ObservableObject {
         ballDetectionManager?.resetTrackingState()
         ingressOpen = true
         isPlaying = true
+        playbackState = .playing
         if ingressOpen && isPlaying { startFrameProcessing() }
     }
     
     func pause() {
+        playRequested = false
+        closePlayback()
+        if seekID == nil, hasLoadedItem { playbackState = .paused }
+    }
+
+    private func closePlayback() {
         ingressOpen = false
         frameRun = UUID()
         ballDetectionManager?.resetTrackingState()
@@ -240,16 +343,37 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     func seek(to time: Double) {
-        let cmTime = CMTime(seconds: time, preferredTimescale: 600)
-        player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentTime = time
-        ballDetectionManager?.resetTrackingState()
+        guard hasLoadedItem, time.isFinite, duration.isFinite, duration > 0 else { return }
+        let target = min(max(time, 0), duration)
+        let request = UUID(), load = loadID
+        // Replace identity before cancellation can synchronously report old failure.
+        seekID = request
+        failedSeekTarget = target
+        closePlayback()
+        playbackState = .seeking
+        if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
+        let completion: (Bool) -> Void = { [weak self] success in
+          self?.deliverState { [weak self] in
+            guard let self, self.loadID == load, self.seekID == request else { return }
+            self.seekID = nil
+            guard success, let position = self.finitePosition() else {
+              self.playRequested = false
+              self.playbackState = .failed("Seek failed. Tap Play to retry.")
+              return
+            }
+            self.failedSeekTarget = nil
+            self.currentTime = position
+            self.playbackState = .paused
+            if self.playRequested && self.contextActive { self.beginPlayback() }
+          }
+        }
+        let cmTime = CMTime(seconds: target, preferredTimescale: 600)
+        if let dependencies { dependencies.seek(cmTime, completion) }
+        else { player?.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero, completionHandler: completion) }
     }
     
     func resetToBeginning() {
-        player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentTime = 0
-        ballDetectionManager?.resetTrackingState()
+        seek(to: 0)
     }
     
     func getPlayerItem() -> AVPlayerItem? {
@@ -287,7 +411,13 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     private func cleanup() {
+        loadID = UUID()
+        seekID = nil
+        failedSeekTarget = nil
         pause()
+        if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
+        retireTime?()
+        retireTime = nil
         if let timeObserver = timeObserver {
             player?.removeTimeObserver(timeObserver)
             self.timeObserver = nil
@@ -310,6 +440,8 @@ final class VideoPlayerManager: ObservableObject {
         isPlaying = false
         currentTime = 0
         duration = 0
+        hasLoadedItem = false
+        playbackState = .empty
     }
     
     deinit {

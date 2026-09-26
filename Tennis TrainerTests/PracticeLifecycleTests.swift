@@ -3,6 +3,34 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testSeekInvalidatesBothHeldStagesAndSuccessRequiresFreshWindow() throws {
+    for heldPublication in [false, true] {
+      let f = try PlaybackFixture()
+      f.play()
+      try f.feed(1...4)
+      f.offer(5)
+      if heldPublication { f.pipeline.worker.drain() }
+      let generation = f.pipeline.manager.admissionGeneration
+      f.onPause = { XCTAssertNotEqual(f.pipeline.manager.admissionGeneration, generation) }
+      f.player.seek(to: 2)
+      f.onPause = nil
+      f.pipeline.flush()
+      XCTAssertEqual(f.frames, 4)
+      XCTAssertEqual(f.cues, 0)
+      XCTAssertEqual(f.tracks, 0)
+      XCTAssertTrue(f.pipeline.pose.detectedPose.isEmpty)
+      XCTAssertNil(f.pipeline.manager.ballPosition)
+      f.seekCompletions[0](true)
+      f.pipeline.flush()
+      try f.feed(1...4)
+      XCTAssertEqual(f.pipeline.manager.diagnostics.preparedRingCount, 4)
+      XCTAssertEqual(f.cues, 0)
+      try f.feed(5...9)
+      XCTAssertEqual(f.cues, 1)
+      XCTAssertEqual(f.starts - f.stops, 1)
+    }
+  }
+
   func testSeekImmediatelyClosesProductionFrameIngress() throws {
     let fixture = try PlaybackFixture()
     fixture.play()
@@ -365,15 +393,22 @@ private final class PlaybackFixture {
   var tracks = 0
   var starts = 0
   var stops = 0
+  var seekCompletions: [(Bool) -> Void] = []
+  var position = CMTime.zero
   var onPause: (() -> Void)?
   lazy var player: VideoPlayerManager = {
     let player = VideoPlayerManager(dependencies: .init(play: { true },
       pause: { [weak self] in self?.onPause?() },
-      startLoop: { [weak self] in self?.starts += 1 }, stopLoop: { [weak self] in self?.stops += 1 }))
+      startLoop: { [weak self] in self?.starts += 1 }, stopLoop: { [weak self] in self?.stops += 1 },
+      seek: { [weak self] target, completion in
+        self?.position = target
+        self?.seekCompletions.append(completion)
+      }, currentTime: { [weak self] in self?.position ?? .invalid }))
     player.setupBallDetection(with: pipeline.pose, factory: { [unowned self] _ in pipeline.manager })
     player.onFrameProcessed = { [weak self] in self?.frames += 1 }
     player.onApex = { [weak self] in self?.cues += 1 }
     pipeline.manager.onBallTrack = { [weak self] _ in self?.tracks += 1 }
+    player.loadVideo(from: URL(fileURLWithPath: "/fixture.mov"))
     return player
   }()
   init() throws { output = try LifecycleOutput() }
