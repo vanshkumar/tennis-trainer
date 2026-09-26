@@ -2,16 +2,16 @@
 gsd_state_version: "1.0"
 current_phase: 2
 current_phase_name: Dependable Practice Controls
-status: planning
-stopped_at: Phase 1 complete; ready to discuss and plan Phase 2
-last_updated: "2026-09-26T13:44:23.573Z"
+status: executing
+stopped_at: Phase 2 planned and verified; ready to execute 02-01
+last_updated: "2026-09-26T14:37:14.457Z"
 last_activity: 2026-09-26
-last_activity_desc: Phase 01 complete, transitioned to Phase 2
-state_head: 52c5c3abddba0cc49cc3adb5daf098810d325110
+last_activity_desc: "Phase 2 planned: 4 plans, 4 waves, 8/8 requirements; independent review passed"
+state_head: c49e45657d9c74a53b007e4921888c5fe0b1ba31
 progress:
   total_phases: 4
   completed_phases: 1
-  total_plans: 3
+  total_plans: 7
   completed_plans: 3
   percent: 25
 ---
@@ -27,14 +27,14 @@ See: .planning/PROJECT.md (updated 2026-09-26)
 
 ## Current Position
 
-Phase: 2 — Dependable Practice Controls
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-09-26 — Phase 01 complete, transitioned to Phase 2
+Phase: 2 (Dependable Practice Controls) — READY TO EXECUTE
+Plan: 0 of 4 (not started)
+Status: Ready to execute
+Last activity: 2026-09-26 — Phase 2 planned: 4 plans, 4 waves, 8/8 requirements; independent review passed
 
 Progress: [███░░░░░░░] 25%
 
-Phase 1 is complete: 3/3 plans, build and 65/65 tests passed, 12/12 deterministic truths verified, and all three human reviews passed. CUE-01 through CUE-04 are accepted. Code review found no blockers or warnings; all twelve planned security mitigations are closed. Phase 2 has not started. Clip/device/audio evidence remains pending Phase 4.
+Phase 1 is complete: 3/3 plans, build and 65/65 tests passed, 12/12 deterministic truths verified, and all three human reviews passed. CUE-01 through CUE-04 are accepted. Code review found no blockers or warnings; all twelve planned security mitigations are closed. Phase 2 planning is complete: four serial plans, nine tasks, all eight requirements covered, and independent plan review passed after one revision. Phase 2 implementation has not started. Clip/device/audio evidence remains pending Phase 4.
 
 ## Performance Metrics
 
@@ -50,7 +50,7 @@ Phase 1 is complete: 3/3 plans, build and 65/65 tests passed, 12/12 deterministi
 |-------|-------|-------|----------|
 | 01 | 3 | 53min | 17.7min |
 
-**Recent Trend:** Three plans executed and accepted; ready to discuss Phase 2.
+**Recent Trend:** Three Phase 1 plans accepted; four Phase 2 plans verified and ready to execute.
 **Per-Plan Metrics:**
 
 | Plan | Duration | Tasks | Files |
@@ -73,6 +73,8 @@ Decisions are logged in PROJECT.md and preferences in config.json.
 - [Phase 01]: Recheck generation after observable pose/ball effects and track callbacks because subscribers can reset synchronously.
 - [Phase 01]: First consumed estimates are authoritative, including missing and low-confidence positions; only the manager authorizes a new cue identity domain.
 - [Phase 01]: Scoped preparation and prediction autorelease pools bound transient owners; each FP16 head validates its own scoped byte span.
+- [Phase 02 planning]: User chose planning without CONTEXT.md. Four serial waves cover lifecycle invalidation, camera recovery/state, seek/end/replay, and transactional imports/cleanup; shared view/player files require ordered execution.
+- [Phase 02 planning]: Same-item end/error events need originating timeline ownership or current backend reconciliation; item/load identity alone cannot protect a newer seek or Replay.
 
 ### Pending Todos
 
@@ -80,6 +82,7 @@ None captured outside the approved requirements.
 
 ### Blockers/Concerns
 
+- [Phase 2] Execution must retain physical permission/Settings/interruption checks, six unclassified edge dispositions and the evidence-limit review as pending until explicitly performed or resolved. Planning passed; no Phase 2 implementation or hardware result is implied.
 - [Phase 4] Representative labeled clips, test-device availability, sustained process memory and physical audio timing setup remain unestablished. Phase 1 preserved baseline provenance/protocol; required missing empirical evidence prevents Phase 4 verification.
 - [Phase 1] Controlled manager-test semaphore stalls emit a Thread Performance Checker priority warning, recorded in WINDOWS.md for review before shipping; independent source review found no corresponding production wait.
 
@@ -89,6 +92,6 @@ No milestone-close deferrals yet; product exclusions are recorded in PROJECT.md 
 
 ## Session Continuity
 
-Last session: 2026-09-26T13:44:23.562Z
-Stopped at: Phase 1 complete; ready to discuss and plan Phase 2
-Resume file: None
+Last session: 2026-09-26T14:37:14.445Z
+Stopped at: Phase 2 planned and verified; ready to execute 02-01
+Resume file: .planning/phases/02-dependable-practice-controls/02-01-PLAN.md

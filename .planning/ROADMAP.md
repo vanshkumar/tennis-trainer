@@ -5,7 +5,7 @@
 Make the existing toss-apex cue dependable in both live-camera practice and saved-video review. First establish consistent feedback from correctly associated frames and pose data, then make session controls trustworthy, align visible tracking with the displayed image, and verify the combined behavior with repeatable clips and real-device evidence. Each phase delivers an observable outcome in the existing app and includes its own regression checks.
 
 **Milestone:** Toss-apex reliability
-**Status:** Phase 1 complete 2026-09-26; Phase 2 ready for discussion and planning
+**Status:** Phase 1 complete; Phase 2 planned and ready to execute 2026-09-26
 **Structure:** Coarse, vertical MVP phases; preserve portrait, right-handed solo practice and on-device processing.
 
 ## Phases
@@ -53,7 +53,7 @@ Planning notes:
 
 ### Phase 2: Dependable Practice Controls
 
-**Goal:** A player can control live practice and saved-video review without old work producing feedback or taking over the current session.
+**Goal:** As a player, I want to control live practice and saved-video review, so that old work cannot produce feedback or take over my current session.
 **Mode:** mvp
 **Depends on:** Phase 1
 **Requirements:** LIFE-01, LIFE-02, CAM-01, CAM-02, PLAY-01, PLAY-02, PLAY-03, PLAY-04
@@ -65,7 +65,23 @@ Planning notes:
 4. Rapid clip replacement, cancellation, and failed loads leave the current selection usable; late metadata, seek, notification, and detection completions from old items cannot change its state.
 5. Repeated play/pause/replacement cycles maintain only the intended active processing loop and release retired outputs, observers, display links, and app-owned video copies without deleting original or externally owned media.
 
-**Plans:** TBD
+**Plans:** 0/4 plans complete
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Stop/Pause/mode lifecycle, fresh ingress and current-mode feedback
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md — Camera permission recovery and actual capture state
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-03-PLAN.md — Latest seek, end and Replay with current-timeline events
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-04-PLAN.md — Transactional imports, media ownership and explicit resource cleanup
+
 **UI hint:** yes
 
 Planning notes:
@@ -138,7 +154,7 @@ All 17 approved v1 requirements map to exactly one owning phase. Cross-phase int
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Consistent Toss Cues | 3/3 | Complete    | 2026-09-26 |
-| 2. Dependable Practice Controls | 0/TBD | Not started | - |
+| 2. Dependable Practice Controls | 0/4 | Planned | - |
 | 3. Accurate Visible Tracking | 0/TBD | Not started | - |
 | 4. Verified Practice Reliability | 0/TBD | Not started | - |
 

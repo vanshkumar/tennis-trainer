@@ -8,6 +8,16 @@
 
 ## Task Notes
 
+**2026-09-26 — Phase 2 playback plan review**
+- Observation: Item/load identity alone in the draft end-event guard could not distinguish a queued notification from a previous playback timeline after seeking or replaying the same item. The independent checker caught this before implementation.
+- Action: Bind end/error events to their originating playback run or reconcile fresh backend state after dispatch. Hold same-item notifications across a successful newer seek/Replay and verify the current run continues while valid current events still work.
+- Confidence: high
+
+**2026-09-26 — Phase 2 lifecycle planning**
+- Observation: Source inspection found both media managers sharing one pose presenter while invalidated publications can clear it, and camera ingress checks its enabled flag separately from analysis admission. These expose old-mode clearing and Stop/Start admission races beyond Phase 1's manager-generation tests; they have not yet been reproduced by Phase 2 tests.
+- Action: Test an old mode's delayed clear after the new mode publishes pose, plus acquired and queued camera callbacks crossing Stop/Start. Require mode-owned or source-gated presentation and an ingress boundary that cannot assign old frames to a fresh generation.
+- Confidence: medium
+
 **2026-09-26 — Phase 1 human acceptance**
 - Observation: The user separately passed the evidence-limit review, original-five-frame association contract, and exact source/session/frame pose with the strict fallback above 0.70. These decisions resolve Phase 1's previously undefined edge obligations without adding runtime measurements.
 - Action: Use `01-UAT.md` as the human acceptance record and preserve the Phase 4 clip/device/process-memory/audio obligations when describing Phase 1 as complete.
