@@ -3,6 +3,34 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testInterruptionInvalidatesHeldWorkAndRecoveryRequiresFreshTossWindow() throws {
+    for holdPublication in [false, true] {
+      let fixture = CaptureFixture()
+      fixture.start()
+      try fixture.feed(1...4)
+      fixture.camera.receiveSampleBuffer(try LifecycleFixture.sample(5))
+      if holdPublication { fixture.pipeline.worker.drain() }
+      fixture.interrupted = true
+      fixture.sessionEvent?(.interrupted)
+      fixture.pipeline.flush()
+      XCTAssertEqual(fixture.camera.captureState, .interrupted)
+      XCTAssertEqual(fixture.frames, 4)
+      XCTAssertEqual(fixture.cues, 0)
+      XCTAssertTrue(fixture.pipeline.pose.detectedPose.isEmpty)
+      fixture.interrupted = false
+      fixture.sessionEvent?(.interruptionEnded)
+      XCTAssertEqual(fixture.camera.captureState, .recovering)
+      fixture.session.drain(); fixture.video.drain(); fixture.session.drain()
+      fixture.pipeline.flush()
+      try fixture.feed(1...4)
+      XCTAssertEqual(fixture.pipeline.manager.diagnostics.preparedRingCount, 4)
+      XCTAssertEqual(fixture.cues, 0)
+      try fixture.feed(5...9)
+      XCTAssertEqual(fixture.cues, 1)
+      XCTAssertTrue(fixture.camera.isRecording)
+    }
+  }
+
   func testPauseInvalidatesHeldPlaybackPublication() throws {
     try assertPlaybackExit(holdPublication: true, contextExit: false)
   }
@@ -312,7 +340,8 @@ final class PracticeLifecycleTests: XCTestCase {
     fixture.pipeline.flush()
     XCTAssertEqual(fixture.pipeline.manager.diagnostics.admitted, 0)
     XCTAssertFalse(fixture.camera.isRecording)
-    XCTAssertTrue(fixture.camera.captureRequested, "Stop stays available")
+    XCTAssertFalse(fixture.camera.captureRequested, "Failed startup retires intent for explicit Retry")
+    XCTAssertTrue(fixture.camera.captureState.canRetry)
   }
 }
 
@@ -353,15 +382,20 @@ private final class CaptureFixture {
   var events: [String] = []
   var beforeAdmission: (() -> Void)?
   var startSucceeds = true
+  var running = false
+  var interrupted = false
+  var sessionEvent: ((CameraManager.SessionEvent) -> Void)?
   var frames = 0
   var cues = 0
   var tracks = 0
   lazy var camera: CameraManager = {
     let camera = CameraManager(dependencies: .init(session: session.enqueue, drain: video.enqueue,
-      state: { $0() }, stop: { [unowned self] in events.append("stop") },
+      state: { $0() }, stop: { [unowned self] in events.append("stop"); running = false },
       attach: { [unowned self] in events.append($0 ? "attach" : "detach") },
-      start: { [unowned self] in events.append("start"); return startSucceeds },
-      beforeAdmission: { [unowned self] in beforeAdmission?() }))
+      start: { [unowned self] in events.append("start"); running = startSucceeds; return running },
+      beforeAdmission: { [unowned self] in beforeAdmission?() },
+      snapshot: { [unowned self] in .init(running: running, interrupted: interrupted) },
+      observe: { [unowned self] callback in sessionEvent = callback; return {} }))
     camera.setupBallDetection(with: pipeline.pose, factory: { [unowned self] _ in pipeline.manager })
     camera.onFrameProcessed = { [unowned self] in frames += 1 }
     camera.onApex = { [unowned self] in cues += 1 }

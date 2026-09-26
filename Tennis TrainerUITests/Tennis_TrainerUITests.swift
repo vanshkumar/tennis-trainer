@@ -8,6 +8,55 @@
 import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
+    @MainActor
+    func testCameraStopDuringStartupAndRecovery() throws {
+        let app = XCUIApplication()
+        for scenario in ["capture-startup", "capture-recovery"] {
+            app.launchArguments = ["--practice-ui-scenario", scenario]
+            app.launch()
+            let action = app.buttons["camera.captureAction"]
+            let status = app.staticTexts["camera.captureStatus"]
+            XCTAssertTrue(action.waitForExistence(timeout: 5))
+            action.tap()
+            if scenario == "capture-recovery" {
+                assertLabel(status, "Status: Running")
+                assertLabel(status, "Status: Interrupted")
+                XCTAssertEqual(action.label, "Stop")
+                XCTAssertTrue(action.isEnabled)
+                assertLabel(status, "Status: Recovering…")
+            } else {
+                assertLabel(status, "Status: Starting…")
+            }
+            XCTAssertEqual(action.label, "Stop")
+            XCTAssertTrue(action.isEnabled)
+            action.tap()
+            assertLabel(status, "Status: Stopped")
+            XCTAssertEqual(action.label, "Start")
+            let lateRunning = expectation(for: NSPredicate(format: "label == %@", "Status: Running"),
+              evaluatedWith: status)
+            lateRunning.isInverted = true
+            wait(for: [lateRunning], timeout: 5)
+            action.tap()
+            assertLabel(status, "Status: Running")
+            app.terminate()
+        }
+
+        app.launchArguments = ["--practice-ui-scenario", "capture-failure"]
+        app.launch()
+        let action = app.buttons["camera.captureAction"]
+        XCTAssertTrue(action.waitForExistence(timeout: 5))
+        action.tap()
+        assertLabel(app.staticTexts["camera.captureStatus"], "Status: Failed: Camera could not start")
+        XCTAssertEqual(action.label, "Retry")
+        action.tap()
+        assertLabel(app.staticTexts["camera.captureStatus"], "Status: Running")
+    }
+
+    @MainActor
+    private func assertLabel(_ element: XCUIElement, _ text: String) {
+        let expected = expectation(for: NSPredicate(format: "label == %@", text), evaluatedWith: element)
+        wait(for: [expected], timeout: 8)
+    }
 
     @MainActor
     func testCameraPermissionControls() throws {

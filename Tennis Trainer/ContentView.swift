@@ -155,7 +155,7 @@ struct ContentView: View {
                             Text("Frames: \(frameCount)")
                                 .foregroundColor(.white)
                                 .font(.caption)
-                            Text("Status: \(cameraManager.isRecording ? "Recording" : "Stopped")")
+                            Text("Status: \(cameraManager.captureState.message)")
                                 .accessibilityIdentifier("camera.captureStatus")
                                 .foregroundColor(.white)
                                 .font(.caption)
@@ -180,7 +180,8 @@ struct ContentView: View {
                     Spacer()
                     
                     HStack {
-                        Button(cameraManager.captureRequested ? "Stop" : "Start") {
+                        Button(cameraManager.captureRequested ? "Stop" :
+                          (cameraManager.captureState.canRetry ? "Retry" : "Start")) {
                             if cameraManager.captureRequested {
                                 cameraManager.stopCapture()
                                 frameCount = 0

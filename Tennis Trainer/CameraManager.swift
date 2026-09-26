@@ -18,6 +18,42 @@ final class CameraManager: NSObject, ObservableObject {
       }
     }
 
+    enum CaptureState: Equatable {
+      case stopped, configuring, starting, running, interrupted, recovering
+      case failed(String)
+
+      var message: String {
+        switch self {
+        case .stopped: return "Stopped"
+        case .configuring: return "Configuring…"
+        case .starting: return "Starting…"
+        case .running: return "Running"
+        case .interrupted: return "Interrupted"
+        case .recovering: return "Recovering…"
+        case .failed(let message): return "Failed: \(message)"
+        }
+      }
+
+      var canRetry: Bool {
+        if case .failed = self { return true }
+        return false
+      }
+    }
+
+    struct SessionSnapshot {
+      var running: Bool
+      var interrupted: Bool = false
+    }
+
+    enum SessionEvent {
+      case started, stopped, interrupted, interruptionEnded
+      case runtimeError(recoverable: Bool)
+    }
+
+    enum ConfigurationError: Error {
+      case missingCamera, inputUnavailable, outputUnavailable
+    }
+
     struct Dependencies {
       var session: (@escaping () -> Void) -> Void
       var drain: (@escaping () -> Void) -> Void
@@ -29,17 +65,29 @@ final class CameraManager: NSObject, ObservableObject {
       var authorization: () -> AVAuthorizationStatus = { .authorized }
       var requestAuthorization: (@escaping (Bool) -> Void) -> Void = { _ in }
       var openSettings: () -> Void = {}
+      var configure: () throws -> Void = {}
+      var snapshot: (() -> SessionSnapshot)? = nil
+      var observe: ((@escaping (SessionEvent) -> Void) -> () -> Void)? = nil
     }
 
-    @Published var isRecording = false
+    @Published private(set) var captureState: CaptureState = .stopped
+    var isRecording: Bool { captureState == .running && captureRequested && hasPermission && contextActive }
     @Published private(set) var captureRequested = false
     @Published private(set) var accessState: AccessState = .undetermined
     var hasPermission: Bool { accessState == .authorized }
     private var authorizationRequest: UUID?
     private var waitingForAuthorization = false
     private var sessionConfigured = false
+    private var removeSessionObservers: (() -> Void)?
+    private var recoveryAttempts = 0
+    // Only the session executor writes configuration/observer ownership.
+    private var ownedSession: AVCaptureSession?
     
-    private lazy var captureSession = AVCaptureSession()
+    private lazy var captureSession: AVCaptureSession = {
+      let session = AVCaptureSession()
+      ownedSession = session
+      return session
+    }()
     private lazy var videoOutput = AVCaptureVideoDataOutput()
     // Keep session lifecycle work responsive even when frame analysis is expensive.
     private let sessionQueue = DispatchQueue(label: "camera.session.queue")
@@ -82,10 +130,6 @@ final class CameraManager: NSObject, ObservableObject {
                 queue: attached ? self.videoProcessingQueue : nil)
             }, start: { [weak self] in
               guard let self, AVCaptureDevice.authorizationStatus(for: .video) == .authorized else { return false }
-              if !self.sessionConfigured {
-                self.configureSession()
-                self.sessionConfigured = true
-              }
               if !self.captureSession.isRunning { self.captureSession.startRunning() }
               return self.captureSession.isRunning
             }, authorization: { AVCaptureDevice.authorizationStatus(for: .video) },
@@ -93,9 +137,27 @@ final class CameraManager: NSObject, ObservableObject {
             openSettings: {
               guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
               UIApplication.shared.open(url)
+            }, configure: { [weak self] in try self?.configureSession() },
+            snapshot: { [weak self] in
+              .init(running: self?.captureSession.isRunning ?? false,
+                interrupted: self?.captureSession.isInterrupted ?? false)
+            }, observe: { [weak self] callback in
+              self?.observeSession(callback) ?? {}
             })
         }
         refreshAuthorization()
+    }
+
+    deinit {
+      removeSessionObservers?()
+      ballDetectionManager?.resetTrackingState()
+      if let session = ownedSession {
+        let output = videoOutput
+        sessionQueue.async {
+          output.setSampleBufferDelegate(nil, queue: nil)
+          if session.isRunning { session.stopRunning() }
+        }
+      }
     }
     
     func refreshAuthorization() {
@@ -111,7 +173,8 @@ final class CameraManager: NSObject, ObservableObject {
           waitingForAuthorization = false
           beginCapture()
         }
-      } else if accessState != .undetermined && accessState != .requesting {
+      } else if (captureRequested && !waitingForAuthorization)
+          || (accessState != .undetermined && accessState != .requesting) {
         stopCapture()
       }
     }
@@ -138,29 +201,24 @@ final class CameraManager: NSObject, ObservableObject {
       dependencies.openSettings()
     }
     
-    private func configureSession() {
+    private func configureSession() throws {
         captureSession.beginConfiguration()
+        defer { captureSession.commitConfiguration() }
         
         captureSession.sessionPreset = .high
         
         guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            print("Error: Could not get back camera")
-            captureSession.commitConfiguration()
-            return
+            throw ConfigurationError.missingCamera
         }
         
         guard let videoInput = try? AVCaptureDeviceInput(device: videoDevice) else {
-            print("Error: Could not create camera input")
-            captureSession.commitConfiguration()
-            return
+            throw ConfigurationError.inputUnavailable
         }
         
         if captureSession.canAddInput(videoInput) {
             captureSession.addInput(videoInput)
         } else {
-            print("Error: Could not add camera input to session")
-            captureSession.commitConfiguration()
-            return
+            throw ConfigurationError.inputUnavailable
         }
         
         configureVideoOutput()
@@ -169,10 +227,9 @@ final class CameraManager: NSObject, ObservableObject {
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
         } else {
-            print("Error: Could not add video output to session")
+            captureSession.removeInput(videoInput)
+            throw ConfigurationError.outputUnavailable
         }
-        
-        captureSession.commitConfiguration()
     }
     
     private func configureVideoOutput() {
@@ -180,7 +237,6 @@ final class CameraManager: NSObject, ObservableObject {
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ]
         
-        videoOutput.setSampleBufferDelegate(self, queue: videoProcessingQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
     }
     
@@ -212,6 +268,7 @@ final class CameraManager: NSObject, ObservableObject {
       refreshAuthorization()
       guard hasPermission || accessState == .undetermined || accessState == .requesting else { return }
       captureRequested = true
+      recoveryAttempts = 0
       if !hasPermission {
         waitingForAuthorization = true
         requestAccess()
@@ -220,18 +277,19 @@ final class CameraManager: NSObject, ObservableObject {
       beginCapture()
     }
 
-    private func beginCapture() {
+    private func beginCapture(recovering: Bool = false) {
       let current = UUID()
       frameProcessingLock.lock()
       operation = current
       ingressGeneration = nil
       frameProcessingLock.unlock()
       ballDetectionManager?.resetTrackingState()
+      captureState = recovering ? .recovering : .configuring
 
       // Stop and detach on the AV owner BEFORE draining the serial callback queue.
       // Reopening a Boolean before this boundary would retag queued old buffers.
       dependencies.session { [weak self] in
-        guard let self else { return }
+        guard let self, self.isCurrentOperation(current) else { return }
         self.dependencies.stop()
         self.dependencies.attach(false)
         self.dependencies.drain { [weak self] in
@@ -242,17 +300,61 @@ final class CameraManager: NSObject, ObservableObject {
               self.dependencies.state { [weak self] in self?.refreshAuthorization() }
               return
             }
+            self.removeSessionObservers?()
+            self.removeSessionObservers = self.dependencies.observe? { [weak self] event in
+              self?.dependencies.state { [weak self] in
+                self?.reconcile(event, operation: current)
+              }
+            }
+            do {
+              if !self.sessionConfigured {
+                try self.dependencies.configure()
+                self.sessionConfigured = true
+              }
+            } catch {
+              self.dependencies.state { [weak self] in
+                guard let self, self.isCurrentOperation(current) else { return }
+                self.failCapture("Camera configuration unavailable")
+              }
+              return
+            }
+            guard self.isCurrentOperation(current), self.dependencies.authorization() == .authorized else {
+              self.dependencies.state { [weak self] in self?.refreshAuthorization() }
+              return
+            }
+            self.dependencies.state { [weak self] in
+              guard let self, self.isCurrentOperation(current) else { return }
+              if !recovering { self.captureState = .starting }
+            }
             self.dependencies.attach(true)
             let running = self.dependencies.start()
+            // startRunning is blocking. Stop may have retired this operation while
+            // it was inside AVFoundation; shut down that physical start immediately.
+            guard self.isCurrentOperation(current) else {
+              self.dependencies.stop()
+              self.dependencies.attach(false)
+              return
+            }
             self.dependencies.state { [weak self] in
               guard let self, self.isCurrentOperation(current) else { return }
               self.refreshAuthorization()
               guard self.hasPermission, self.isCurrentOperation(current) else { return }
-              self.isRecording = running
+              guard self.hasPermission, self.captureRequested, self.contextActive else { return }
+              let actual = self.dependencies.snapshot?() ?? .init(running: running)
+              if actual.interrupted {
+                self.invalidateAnalysis()
+                self.captureState = .interrupted
+                return
+              }
+              guard actual.running else {
+                self.failCapture("Camera could not start")
+                return
+              }
+              self.captureState = .running
               let generation = self.ballDetectionManager?.admissionGeneration
               self.frameProcessingLock.lock()
               if self.operation == current {
-                self.ingressGeneration = running ? generation : nil
+                self.ingressGeneration = generation
               }
               self.frameProcessingLock.unlock()
             }
@@ -269,11 +371,91 @@ final class CameraManager: NSObject, ObservableObject {
       ballDetectionManager?.resetTrackingState()
       captureRequested = false
       waitingForAuthorization = false
-      isRecording = false
+      captureState = .stopped
+      let stoppedOperation = currentOperation
       dependencies.session { [weak self] in
-        self?.dependencies.stop()
-        self?.dependencies.attach(false)
+        guard let self, self.isCurrentOperation(stoppedOperation) else { return }
+        self.removeSessionObservers?()
+        self.removeSessionObservers = nil
+        self.dependencies.stop()
+        self.dependencies.attach(false)
       }
+    }
+
+    private func invalidateAnalysis() {
+      frameProcessingLock.lock()
+      ingressGeneration = nil
+      frameProcessingLock.unlock()
+      ballDetectionManager?.resetTrackingState()
+    }
+
+    private func failCapture(_ message: String) {
+      stopCapture()
+      captureState = .failed(message)
+    }
+
+    private func recoverCapture() {
+      guard recoveryAttempts < 1 else {
+        failCapture("Camera recovery failed. Retry to continue")
+        return
+      }
+      recoveryAttempts += 1
+      beginCapture(recovering: true)
+    }
+
+    private func reconcile(_ event: SessionEvent, operation current: UUID) {
+      guard isCurrentOperation(current) else { return }
+      refreshAuthorization()
+      guard isCurrentOperation(current), captureRequested, contextActive, hasPermission,
+            let actual = dependencies.snapshot?() else { return }
+      // Read the backend AFTER delivery to the state executor. Queued notification
+      // names are historical evidence, never authority to resume or overwrite state.
+      if actual.interrupted {
+        if captureState != .interrupted { invalidateAnalysis() }
+        captureState = .interrupted
+        return
+      }
+      switch event {
+      case .interruptionEnded:
+        if captureState == .interrupted { recoverCapture() }
+      case .runtimeError(let recoverable):
+        guard !actual.running else { return }
+        invalidateAnalysis()
+        if recoverable { recoverCapture() }
+        else { failCapture("Camera stopped unexpectedly") }
+      case .stopped:
+        if !actual.running && captureState == .running {
+          failCapture("Camera stopped unexpectedly")
+        }
+      case .started, .interrupted:
+        // Startup completion owns reopening after configure/start AND callback drain.
+        break
+      }
+    }
+
+    private func observeSession(_ callback: @escaping (SessionEvent) -> Void) -> () -> Void {
+      let center = NotificationCenter.default
+      let events: [(Notification.Name, SessionEvent)] = [
+        (AVCaptureSession.didStartRunningNotification, .started),
+        (AVCaptureSession.didStopRunningNotification, .stopped),
+        (AVCaptureSession.wasInterruptedNotification, .interrupted),
+        (AVCaptureSession.interruptionEndedNotification, .interruptionEnded)
+      ]
+      var tokens = events.map { name, event in
+        center.addObserver(forName: name, object: captureSession, queue: nil) { _ in callback(event) }
+      }
+      tokens.append(center.addObserver(forName: AVCaptureSession.runtimeErrorNotification,
+        object: captureSession, queue: nil) { notification in
+          let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError
+          callback(.runtimeError(recoverable: error?.code == .mediaServicesWereReset))
+        })
+      return { tokens.forEach(center.removeObserver) }
+    }
+
+    private var currentOperation: UUID {
+      frameProcessingLock.lock()
+      defer { frameProcessingLock.unlock() }
+      return operation
     }
 
     func setContextActive(_ active: Bool) {

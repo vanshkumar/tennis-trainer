@@ -8,6 +8,11 @@
 
 ## Task Notes
 
+**2026-09-26 — Camera startup and notification reconciliation**
+- Observation: A failed physical start left captureRequested true and blocked every later Start. A successful start can also become obsolete before its state publication; the injected tests reproduce Stop during configure/start and backend changes before delivery.
+- Action: Retire failed intent into a visible Retry state, inspect current backend state after dispatch, and physically stop a start whose operation was retired while AVFoundation was running. Keep one automatic recovery budget per explicit Start and reopen analysis only after the callback queue drain.
+- Confidence: high
+
 **2026-09-26 — Camera permission callback ownership**
 - Observation: A held permission callback can report grant after the current authorization snapshot is denied, and one outstanding OS request can span Stop followed by a new explicit Start. The camera tests distinguish request identity from current capture intent and query authorization after state delivery.
 - Action: Keep request coalescing separate from capture operation identity; let only current OS authorization and an active explicit Start reopen capture. A permission-only request or Settings grant must leave the camera stopped.
