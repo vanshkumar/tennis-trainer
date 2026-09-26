@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 4
+open_count: 5
 waived_count: 0
 fixed_count: 1
-total_count: 5
-last_updated: 2026-09-26T16:03:47.403Z
+total_count: 6
+last_updated: 2026-09-26T16:28:36.843Z
 ---
 
 # Broken Windows Ledger
@@ -20,6 +20,7 @@ last_updated: 2026-09-26T16:03:47.403Z
 | 3 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera permission request, Settings grant/revoke return, and supported restriction checks remain pending; user deferred to end of Phase 2. | open |  | 2026-09-26T15:44:12.034Z |  |
 | 4 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-02-PLAN.md |  | Physical camera startup, Stop, interruption and return/retry checks remain pending; injected events are not hardware evidence. | open |  | 2026-09-26T15:44:12.156Z |  |
 | 5 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-03-PLAN.md |  | Real local-media end, repeated scrubbing, Pause during seek and Replay inspection deferred by user to Phase 2 end; no clip accuracy or physical audio evidence. | open |  | 2026-09-26T16:03:47.403Z |  |
+| 6 | 02 | unrun-verify | .planning/phases/02-dependable-practice-controls/02-04-PLAN.md |  | Phase 2 human review still owes all six unclassified edge dispositions and the descriptor-less transparency prohibition; injected controls and synthetic AV media do not establish physical camera, representative clip or audio results. | open |  | 2026-09-26T16:28:36.843Z |  |
 
 ````json
 [
@@ -85,6 +86,19 @@ last_updated: 2026-09-26T16:03:47.403Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-26T16:03:47.403Z",
+    "resolved_at": null,
+    "milestone": null
+  },
+  {
+    "id": 6,
+    "kind": "unrun-verify",
+    "phase": "02",
+    "file": ".planning/phases/02-dependable-practice-controls/02-04-PLAN.md",
+    "line": null,
+    "description": "Phase 2 human review still owes all six unclassified edge dispositions and the descriptor-less transparency prohibition; injected controls and synthetic AV media do not establish physical camera, representative clip or audio results.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-26T16:28:36.843Z",
     "resolved_at": null,
     "milestone": null
   }
