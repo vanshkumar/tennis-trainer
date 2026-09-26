@@ -19,6 +19,37 @@ final class VideoPlayerManager: ObservableObject {
       var frameOutput: (() -> FrameOutputReading)? = nil
       var observeEvents: ((@escaping (ItemEvent) -> Void) -> (() -> Void))? = nil
       var snapshot: (() -> PlaybackSnapshot)? = nil
+      var prepare: ((VideoImportManager.MediaHandle, @escaping (Result<Metadata, Error>) -> Void,
+                     @escaping (Readiness) -> Void) -> (() -> Void))? = nil
+    }
+    struct Metadata {
+      var duration: Double
+      var playable = true
+      var hasVideo = true
+      var orientation: CGImagePropertyOrientation = .up
+      var isValid: Bool { playable && hasVideo && duration.isFinite && duration > 0 }
+    }
+    enum Readiness { case unknown, ready, failed }
+    private final class Candidate {
+      let id: UUID
+      let media: VideoImportManager.MediaHandle
+      var metadata: Metadata?
+      var ready = false
+      var player: AVPlayer?
+      var item: AVPlayerItem?
+      var task: Task<Void, Never>?
+      var status: NSKeyValueObservation?
+      var cancel: (() -> Void)?
+      init(id: UUID, media: VideoImportManager.MediaHandle) { self.id = id; self.media = media }
+      func retire() {
+        task?.cancel(); task = nil
+        status?.invalidate(); status = nil
+        let cancel = cancel; self.cancel = nil; cancel?()
+        player?.pause(); item?.cancelPendingSeeks()
+        player?.replaceCurrentItem(with: nil)
+        player = nil; item = nil
+      }
+      deinit { retire() }
     }
     enum ItemEvent { case ended, failed }
     struct PlaybackSnapshot {
@@ -47,6 +78,8 @@ final class VideoPlayerManager: ObservableObject {
     private var hasLoadedItem = false
     private var media: VideoImportManager.MediaHandle?
     private var replacementID: UUID?
+    private var candidate: Candidate?
+    private var orientation: CGImagePropertyOrientation = .up
     @Published private(set) var importMessage: String?
     private var retireTicks: (() -> Void)?
     private var retireTime: (() -> Void)?
@@ -114,6 +147,7 @@ final class VideoPlayerManager: ObservableObject {
 
     @discardableResult
     func beginReplacement() -> UUID {
+        retireCandidate()
         pause()
         seekID = nil
         if let dependencies { dependencies.cancelSeeks() } else { playerItem?.cancelPendingSeeks() }
@@ -125,7 +159,7 @@ final class VideoPlayerManager: ObservableObject {
     }
 
     func cancelReplacement() {
-        replacementID = nil
+        retireCandidate()
         isLoading = false
         importMessage = "Video selection cancelled. Choose another video."
     }
@@ -136,81 +170,145 @@ final class VideoPlayerManager: ObservableObject {
         case .selected(let handle): loadVideo(handle, request: request)
         case .cancelled: cancelReplacement()
         case .failed:
-          replacementID = nil
+          retireCandidate()
           isLoading = false
           importMessage = "Video could not be imported. Choose another video."
         }
     }
 
     func loadVideo(_ handle: VideoImportManager.MediaHandle, request: UUID) {
-        guard replacementID == request else { return }
-        let url = handle.url
-        if let dependencies {
-          guard let seconds = dependencies.load(url), seconds.isFinite, seconds > 0 else {
-            replacementID = nil
-            isLoading = false
-            importMessage = "Video could not load. Choose another video."
-            return
-          }
-          cleanup()
-          media = handle
-          sourceID = UUID()
-          ballDetectionManager?.resetTrackingState(sourceID: sourceID)
-          duration = seconds
-          hasLoadedItem = true
-          playbackState = .paused
-          setupTimeObserver()
-          return
-        }
-        // Clean up previous player
-        cleanup()
-        media = handle
-        let load = loadID
-        isLoading = true
-        sourceID = UUID()
-        ballDetectionManager?.resetTrackingState(sourceID: sourceID)
-        
-        let asset = AVAsset(url: url)
-        playerItem = AVPlayerItem(asset: asset)
-        player = AVPlayer(playerItem: playerItem)
-        
-        // Mute the video audio
-        player?.isMuted = true
-        
-        // Set up video output for frame extraction
-        setupVideoOutput()
-        
-        
-        setupTimeObserver()
-        
-        Task {
-            defer { withExtendedLifetime(handle) {} }
-            do {
-                let duration = try await asset.load(.duration)
-                let isPlayable = try await asset.load(.isPlayable)
-                
-                await MainActor.run {
-                    guard self.loadID == load else { return }
-                    let seconds = CMTimeGetSeconds(duration)
-                    self.isLoading = false
-                    guard isPlayable, seconds.isFinite, seconds > 0 else {
-                      self.playbackState = .failed("Video could not load")
-                      return
-                    }
-                    self.duration = seconds
-                    self.hasLoadedItem = true
-                    self.playbackState = .paused
-                }
-            } catch {
-                await MainActor.run {
-                    guard self.loadID == load else { return }
-                    self.isLoading = false
-                    self.playbackState = .failed("Video could not load")
-                }
+      guard replacementID == request else { return }
+      let pending = Candidate(id: request, media: handle)
+      candidate = pending
+      if let dependencies {
+        if let prepare = dependencies.prepare {
+          let cancel = prepare(handle.lease(), { [weak self, weak pending, handle] result in
+            self?.deliverState { [weak self, weak pending, handle] in
+              defer { withExtendedLifetime(handle) {} }
+              guard let self, let pending else { return }
+              self.receiveMetadata(result, for: pending)
             }
+          }, { [weak self, weak pending, handle] status in
+            self?.deliverState { [weak self, weak pending, handle] in
+              defer { withExtendedLifetime(handle) {} }
+              guard let self, let pending else { return }
+              self.receiveReadiness(status, for: pending)
+            }
+          })
+          if isCurrent(pending) { pending.cancel = cancel } else { cancel() }
+        } else {
+          let seconds = dependencies.load(handle.url)
+          guard isCurrent(pending) else { return }
+          receiveMetadata(.success(.init(duration: seconds ?? 0)), for: pending)
+          receiveReadiness(.ready, for: pending)
         }
+        return
+      }
+      let asset = AVURLAsset(url: handle.url)
+      pending.task = Task { [weak self, weak pending, handle] in
+        // Cancellation is only a request. Asset loading retains its own file lease
+        // until the suspended consumer has actually returned.
+        defer { withExtendedLifetime(handle) {} }
+        do {
+          let playable = try await asset.load(.isPlayable)
+          guard await MainActor.run(body: { [weak self, weak pending] in
+            guard let self, let pending else { return false }; return self.isCurrent(pending)
+          }) else { return }
+          let duration = try await asset.load(.duration)
+          guard await MainActor.run(body: { [weak self, weak pending] in
+            guard let self, let pending else { return false }; return self.isCurrent(pending)
+          }) else { return }
+          let tracks = try await asset.loadTracks(withMediaType: .video)
+          guard await MainActor.run(body: { [weak self, weak pending] in
+            guard let self, let pending else { return false }; return self.isCurrent(pending)
+          }) else { return }
+          let transform = try await tracks.first?.load(.preferredTransform)
+          await MainActor.run { [weak self, weak pending] in
+            guard let self, let pending, self.isCurrent(pending) else { return }
+            let metadata = Metadata(duration: CMTimeGetSeconds(duration), playable: playable,
+              hasVideo: !tracks.isEmpty, orientation: Self.orientation(for: transform ?? .identity))
+            guard metadata.isValid else { self.failCandidate(pending); return }
+            pending.metadata = metadata
+            self.observeReadiness(of: pending, asset: asset)
+          }
+        } catch {
+          await MainActor.run { [weak self, weak pending] in
+            guard let self, let pending else { return }; self.failCandidate(pending)
+          }
+        }
+      }
     }
-    
+
+    private func isCurrent(_ pending: Candidate) -> Bool {
+      candidate === pending && replacementID == pending.id
+    }
+
+    private func observeReadiness(of pending: Candidate, asset: AVAsset) {
+      let item = AVPlayerItem(asset: asset)
+      let player = AVPlayer(playerItem: item)
+      player.isMuted = true
+      pending.item = item; pending.player = player
+      let handle = pending.media.lease()
+      pending.status = item.observe(\.status, options: [.initial, .new]) { [weak self, weak pending, handle] item, _ in
+        let status: Readiness = item.status == .readyToPlay ? .ready : (item.status == .failed ? .failed : .unknown)
+        self?.deliverState { [weak self, weak pending, handle] in
+          defer { withExtendedLifetime(handle) {} }
+          guard let self, let pending else { return }
+          self.receiveReadiness(status, for: pending)
+        }
+      }
+    }
+
+    private func receiveMetadata(_ result: Result<Metadata, Error>, for pending: Candidate) {
+      guard isCurrent(pending) else { return }
+      guard case .success(let metadata) = result, metadata.isValid else { failCandidate(pending); return }
+      pending.metadata = metadata
+      commitIfReady(pending)
+    }
+
+    private func receiveReadiness(_ status: Readiness, for pending: Candidate) {
+      guard isCurrent(pending) else { return }
+      switch status {
+      case .unknown: return
+      case .failed: failCandidate(pending)
+      case .ready: pending.ready = true; commitIfReady(pending)
+      }
+    }
+
+    private func failCandidate(_ pending: Candidate) {
+      guard isCurrent(pending) else { return }
+      retireCandidate()
+      isLoading = false
+      importMessage = "Video could not load. Choose another video."
+    }
+
+    private func retireCandidate() {
+      replacementID = nil
+      let retired = candidate
+      candidate = nil
+      retired?.retire()
+    }
+
+    private func commitIfReady(_ pending: Candidate) {
+      guard isCurrent(pending), pending.ready, let metadata = pending.metadata else { return }
+      // Detach from candidate cancellation before retiring the previous session.
+      candidate = nil; replacementID = nil
+      pending.status?.invalidate(); pending.status = nil
+      cleanup()
+      media = pending.media
+      player = pending.player; playerItem = pending.item
+      pending.player = nil; pending.item = nil
+      orientation = metadata.orientation
+      sourceID = UUID()
+      ballDetectionManager?.resetTrackingState(sourceID: sourceID)
+      duration = metadata.duration
+      currentTime = 0
+      hasLoadedItem = true
+      playbackState = .paused
+      setupVideoOutput()
+      setupTimeObserver()
+    }
+
     private func setupVideoOutput() {
         guard let playerItem = playerItem else { return }
         
@@ -289,30 +387,15 @@ final class VideoPlayerManager: ObservableObject {
         orientation: orientation, requiresActiveContext: true)
     }
     
-    private func getVideoOrientation() -> CGImagePropertyOrientation {
-        guard let playerItem = playerItem,
-              let videoTrack = playerItem.asset.tracks(withMediaType: .video).first else {
-            return .right // Default fallback
-        }
-        
-        let transform = videoTrack.preferredTransform
-        
-        // Convert CGAffineTransform to CGImagePropertyOrientation
-        if transform.a == 0 && transform.b == 1.0 && transform.c == -1.0 && transform.d == 0 {
-            // 90 degree rotation
-            return .right
-        } else if transform.a == 0 && transform.b == -1.0 && transform.c == 1.0 && transform.d == 0 {
-            // -90 degree rotation  
-            return .left
-        } else if transform.a == -1.0 && transform.b == 0 && transform.c == 0 && transform.d == -1.0 {
-            // 180 degree rotation
-            return .down
-        } else {
-            // No rotation or identity transform
-            return .up
-        }
+    private func getVideoOrientation() -> CGImagePropertyOrientation { orientation }
+
+    private static func orientation(for transform: CGAffineTransform) -> CGImagePropertyOrientation {
+      if transform.a == 0 && transform.b == 1 && transform.c == -1 && transform.d == 0 { return .right }
+      if transform.a == 0 && transform.b == -1 && transform.c == 1 && transform.d == 0 { return .left }
+      if transform.a == -1 && transform.b == 0 && transform.c == 0 && transform.d == -1 { return .down }
+      return .up
     }
-    
+
     private func setupTimeObserver() {
         let load = loadID
         let accept: (CMTime) -> Void = { [weak self] _ in
@@ -344,7 +427,7 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     func play() {
-        guard contextActive, hasLoadedItem, !isPlaying else { return }
+        guard contextActive, !isLoading, hasLoadedItem, !isPlaying else { return }
         if playbackState == .ended { replay(); return }
         playRequested = true
         guard seekID == nil else { return }
@@ -353,7 +436,7 @@ final class VideoPlayerManager: ObservableObject {
     }
 
     private func beginPlayback() {
-        guard contextActive, playRequested, seekID == nil, hasLoadedItem, !isPlaying else { return }
+        guard contextActive, !isLoading, playRequested, seekID == nil, hasLoadedItem, !isPlaying else { return }
         if let dependencies {
           guard dependencies.play() else { return }
         } else {
@@ -407,7 +490,7 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     func seek(to time: Double) {
-        guard hasLoadedItem, time.isFinite, duration.isFinite, duration > 0 else { return }
+        guard !isLoading, hasLoadedItem, time.isFinite, duration.isFinite, duration > 0 else { return }
         let target = min(max(time, 0), duration)
         let cmTime = CMTime(seconds: target, preferredTimescale: 600)
         guard cmTime.isValid, cmTime.isNumeric, CMTimeGetSeconds(cmTime).isFinite else { return }
@@ -442,7 +525,7 @@ final class VideoPlayerManager: ObservableObject {
     }
 
     func replay() {
-      guard contextActive, hasLoadedItem else { return }
+      guard contextActive, !isLoading, hasLoadedItem else { return }
       playRequested = true
       seek(to: 0)
     }
@@ -545,7 +628,7 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     private func cleanup() {
-        replacementID = nil
+        retireCandidate()
         loadID = UUID()
         seekID = nil
         failedSeekTarget = nil

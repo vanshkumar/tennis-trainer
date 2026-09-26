@@ -3,6 +3,27 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class PracticeLifecycleTests: XCTestCase {
+  func testReplacementIntentInvalidatesBothHeldStagesAndFreshClipCanCue() throws {
+    for heldPublication in [false, true] {
+      let f = try PlaybackFixture()
+      f.play(); try f.feed(1...4)
+      f.offer(5)
+      if heldPublication { f.pipeline.worker.drain() }
+      let request = f.player.beginReplacement()
+      f.pipeline.flush()
+      XCTAssertEqual(f.frames, 4)
+      XCTAssertEqual(f.cues, 0)
+      XCTAssertNil(f.pipeline.manager.ballPosition)
+      XCTAssertTrue(f.pipeline.pose.detectedPose.isEmpty)
+      f.player.acceptImport(.selected(.external(URL(fileURLWithPath: "/new.mov"))), request: request)
+      f.play()
+      try f.feed(1...4)
+      XCTAssertEqual(f.pipeline.manager.diagnostics.preparedRingCount, 4)
+      XCTAssertEqual(f.cues, 0)
+      try f.feed(5...9)
+      XCTAssertEqual(f.cues, 1)
+    }
+  }
   func testRetiredItemTickCannotEnterReplacementButFreshItemCanCue() throws {
     let f = try PlaybackFixture()
     f.play(); try f.feed(1...9)

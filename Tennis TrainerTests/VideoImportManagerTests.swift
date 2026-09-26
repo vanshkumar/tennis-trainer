@@ -3,6 +3,28 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoImportManagerTests: XCTestCase {
+  func testCancelledMetadataConsumerKeepsLeaseUntilActualCompletion() {
+    var removed: [URL] = []
+    let importer = VideoImportManager(effects: .init(prepare: { _ in }, copy: { _, _ in },
+      remove: { removed.append($0) }, state: { $0() }))
+    var held: ((Result<VideoPlayerManager.Metadata, Error>) -> Void)?
+    var cancellations = 0
+    let player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {},
+      prepare: { _, metadata, _ in held = metadata; return { cancellations += 1 } }))
+    let request = player.beginReplacement()
+    importer.begin(request: request) { player.acceptImport($1, request: $0) }
+    importer.receiveSelection(request: request) { completion in
+      completion(URL(fileURLWithPath: "/original.mov"), nil); return Progress()
+    }
+    player.cancelReplacement()
+    XCTAssertEqual(cancellations, 1)
+    XCTAssertTrue(removed.isEmpty, "Cancel is not consumer completion")
+    held?(.success(.init(duration: 12)))
+    XCTAssertEqual(player.duration, 0)
+    held = nil
+    XCTAssertEqual(removed.count, 1)
+    XCTAssertNotEqual(removed[0], URL(fileURLWithPath: "/original.mov"))
+  }
   func testCopyOccursInsideProviderLifetimeAndCurrentImportLoadsPausedPlayer() {
     var inCallback = false
     var copied: [URL] = [], removed: [URL] = []

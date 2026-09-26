@@ -3,6 +3,96 @@ import AVFoundation
 @testable import Tennis_Trainer
 
 final class VideoPlayerManagerTests: XCTestCase {
+  func testCandidatesRequireValidMetadataAndReadinessInEitherOrder() {
+    for readyFirst in [false, true] {
+      let f = CandidateEffects()
+      f.player.loadVideo(from: URL(fileURLWithPath: "/candidate.mov"))
+      if readyFirst { f.ready[0](.ready) } else { f.metadata[0](.success(.init(duration: 17))) }
+      XCTAssertEqual(f.player.duration, 0)
+      XCTAssertTrue(f.player.isLoading)
+      f.player.play()
+      XCTAssertFalse(f.player.isPlaying)
+      if readyFirst { f.metadata[0](.success(.init(duration: 17))) } else { f.ready[0](.ready) }
+      XCTAssertEqual(f.player.duration, 17)
+      XCTAssertEqual(f.player.playbackState, .paused)
+      XCTAssertFalse(f.player.isLoading)
+      f.player.play()
+      f.metadata[0](.success(.init(duration: 44))); f.ready[0](.failed)
+      XCTAssertEqual(f.player.duration, 17)
+      XCTAssertTrue(f.player.isPlaying, "Duplicate completion must not recommit or fail")
+    }
+  }
+
+  func testSupersededMetadataReadinessAndErrorsCannotAlterNewCandidate() {
+    for staleFirst in [false, true] {
+      let f = CandidateEffects()
+      f.load("A"); f.load("B")
+      XCTAssertEqual(f.cancelled, 1)
+      if staleFirst { f.metadata[0](.success(.init(duration: 99))); f.ready[0](.ready) }
+      f.metadata[1](.success(.init(duration: 22))); f.ready[1](.ready)
+      f.player.play()
+      f.metadata[0](.failure(NSError(domain: "fixture", code: 1)))
+      f.ready[0](.failed); f.metadata[0](.success(.init(duration: 99))); f.ready[0](.ready)
+      XCTAssertEqual(f.player.duration, 22)
+      XCTAssertTrue(f.player.isPlaying)
+      XCTAssertNil(f.player.importMessage)
+      XCTAssertFalse(f.player.isLoading)
+    }
+  }
+
+  func testInvalidCandidateLeavesPriorSelectionPausedAndFirstFailureEmpty() {
+    let invalid: [VideoPlayerManager.Metadata] = [
+      .init(duration: 4, playable: false), .init(duration: 4, hasVideo: false),
+      .init(duration: 0), .init(duration: -1), .init(duration: .infinity), .init(duration: .nan)
+    ]
+    for initial in [false, true] {
+      for metadata in invalid {
+        let f = CandidateEffects()
+        if initial { f.load("original"); f.metadata[0](.success(.init(duration: 30))); f.ready[0](.ready); f.player.play() }
+        f.load("invalid")
+        f.metadata.last?(.success(metadata)); f.ready.last?(.ready)
+        XCTAssertEqual(f.player.duration, initial ? 30 : 0)
+        XCTAssertFalse(f.player.isLoading)
+        XCTAssertFalse(f.player.isPlaying)
+        XCTAssertNotNil(f.player.importMessage)
+        f.player.play()
+        XCTAssertEqual(f.player.isPlaying, initial)
+      }
+    }
+  }
+
+  func testReadinessFailureMetadataErrorCancelAndContextExitPreserveSelection() {
+    for outcome in 0..<4 {
+      let f = CandidateEffects()
+      f.load("original"); f.metadata[0](.success(.init(duration: 30))); f.ready[0](.ready)
+      f.player.play(); f.load("replacement")
+      switch outcome {
+      case 0: f.metadata[1](.success(.init(duration: 20))); f.ready[1](.failed)
+      case 1: f.metadata[1](.failure(NSError(domain: "fixture", code: 1)))
+      case 2: f.player.cancelReplacement()
+      default: f.player.setContextActive(false)
+      }
+      f.metadata[1](.success(.init(duration: 20))); f.ready[1](.ready)
+      XCTAssertEqual(f.player.duration, 30)
+      XCTAssertFalse(f.player.isPlaying)
+      XCTAssertFalse(f.player.isLoading)
+      f.player.setContextActive(true); f.player.play()
+      XCTAssertTrue(f.player.isPlaying)
+    }
+  }
+
+  func testCandidateRechecksIdentityAfterStateDeliveryHop() {
+    let f = CandidateEffects()
+    f.load("A"); f.hold = true
+    f.metadata[0](.success(.init(duration: 10))); f.ready[0](.ready)
+    f.load("B")
+    while !f.jobs.isEmpty { f.jobs.removeFirst()() }
+    XCTAssertTrue(f.player.isLoading)
+    XCTAssertEqual(f.player.duration, 0)
+    f.hold = false
+    f.metadata[1](.success(.init(duration: 20))); f.ready[1](.ready)
+    XCTAssertEqual(f.player.duration, 20)
+  }
   func testReentrantNewerReplacementWinsOlderLoadReturn() {
     var player: VideoPlayerManager!
     player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {}, load: { url in
@@ -276,6 +366,21 @@ final class VideoPlayerManagerTests: XCTestCase {
     XCTAssertEqual(f.maximumLoops, 1)
     XCTAssertEqual(f.retiredTicks, 21)
   }
+}
+
+final class CandidateEffects {
+  var metadata: [(Result<VideoPlayerManager.Metadata, Error>) -> Void] = []
+  var ready: [(VideoPlayerManager.Readiness) -> Void] = []
+  var cancelled = 0
+  var hold = false
+  var jobs: [() -> Void] = []
+  lazy var player = VideoPlayerManager(dependencies: .init(play: { true }, pause: {}, startLoop: {}, stopLoop: {},
+    state: { [weak self] job in if self?.hold == true { self?.jobs.append(job) } else { job() } },
+    prepare: { [weak self] _, metadata, ready in
+      self?.metadata.append(metadata); self?.ready.append(ready)
+      return { [weak self] in self?.cancelled += 1 }
+    }))
+  func load(_ name: String) { player.loadVideo(from: URL(fileURLWithPath: "/" + name + ".mov")) }
 }
 
 final class PlayerEffects {
