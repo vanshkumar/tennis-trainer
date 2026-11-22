@@ -4,6 +4,44 @@ import CoreML
 @testable import Tennis_Trainer
 
 final class BallDetectionManagerTests: XCTestCase {
+  func testPoseOnlyPublishesOrientedFrame_WithoutRunningBallInference() throws {
+    var analyses = 0
+    var observations: [PoseDetectionManager.FrameObservation] = []
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+      analyses += 1
+      return .init(samples: nil, position: nil)
+    }, extractPose: { _, identity in .init(identity: identity, joints: [:]) },
+      worker: { $0() }, publication: { $0() }))
+    manager.setPoseOnly(true)
+    manager.onPoseFrame = { observations.append($0) }
+    let source = UUID()
+    let buffer = try AnalysisFixture.pixels(width: 768, height: 432)
+    XCTAssertTrue(manager.process(input: .init(pixelBuffer: buffer, sourceTime: .zero,
+      orientation: .right, sourceID: source)))
+    XCTAssertEqual(analyses, 0)
+    XCTAssertEqual(observations.count, 1)
+    XCTAssertEqual(observations.first?.orientedSize, CGSize(width: 432, height: 768))
+    XCTAssertEqual(observations.first?.pose.identity.sourceID, source)
+    manager.setPoseOnly(false)
+    XCTAssertTrue(manager.process(input: .init(pixelBuffer: buffer, sourceTime: .zero,
+      orientation: .up, sourceID: source)))
+    XCTAssertEqual(analyses, 1)
+  }
+
+  func testPoseCallbackRetired_WhenDrillChangesBeforePublication() throws {
+    var jobs: [() -> Void] = []
+    var observations = 0
+    let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in
+      .init(samples: nil, position: nil)
+    }, worker: { $0() }, publication: { jobs.append($0) }))
+    manager.onPoseFrame = { _ in observations += 1 }
+    XCTAssertTrue(manager.process(input: input(try pixels(), 0, source: UUID())))
+    manager.setPoseOnly(true)
+    jobs.removeFirst()()
+    XCTAssertEqual(observations, 0)
+    XCTAssertEqual(manager.diagnostics.currentLeases, 0)
+  }
+
   func testExpectedGenerationRejectsAcquiredInput_WithoutPoseOrLease() throws {
     var poses = 0
     let manager = BallDetectionManager(dependencies: .init(analyze: { _, _, _ in

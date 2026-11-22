@@ -9,6 +9,36 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
     @MainActor
+    func testBackhandSetupAndDrillSwitchControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-overlay"]
+        app.launch()
+        app.buttons["Backhand"].tap()
+        let ready = app.buttons["backhand.ready"]
+        XCTAssertTrue(ready.waitForExistence(timeout: 5))
+        XCTAssertFalse(ready.isEnabled)
+        app.buttons["camera.captureAction"].tap()
+        XCTAssertTrue(ready.isEnabled)
+        let live = XCTAttachment(screenshot: app.screenshot())
+        live.name = "Backhand live setup"; live.lifetime = .keepAlways; add(live)
+        ready.tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'capturing in'")).firstMatch.exists)
+        app.buttons["camera.captureAction"].tap()
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'capturing in'")).firstMatch.exists)
+        XCTAssertFalse(app.buttons["backhand.checkpoint"].isEnabled)
+        app.buttons["Video Playback"].tap()
+        XCTAssertTrue(ready.isEnabled)
+        XCTAssertTrue(app.buttons["+0.03s"].isEnabled)
+        app.buttons["+0.03s"].tap()
+        assertLabel(app.staticTexts["playback.status"], "Paused")
+        let video = XCTAttachment(screenshot: app.screenshot())
+        video.name = "Backhand video setup"; video.lifetime = .keepAlways; add(video)
+        app.buttons["Serve"].tap()
+        XCTAssertFalse(ready.exists)
+        XCTAssertTrue(app.buttons["playback.action"].isEnabled)
+    }
+
+    @MainActor
     func testVideoImportRecoveryControls() throws {
         let app = XCUIApplication()
         for scenario in ["playback-import", "playback-import-empty"] {

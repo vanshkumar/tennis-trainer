@@ -67,6 +67,7 @@ final class BallDetectionManager: ObservableObject {
     var lastTime: CMTime?
     var lease: Lease?
     var needsReset = false
+    var poseOnly = false
     var diagnostics = Diagnostics()
 
     func isCurrent(_ identity: FrameIdentity) -> Bool {
@@ -113,6 +114,7 @@ final class BallDetectionManager: ObservableObject {
   var onBallTrack: (([GridTrackNetDetector.Sample]) -> Void)?
   var onApex: (() -> Void)?
   var onFrameProcessed: (() -> Void)?
+  var onPoseFrame: ((PoseDetectionManager.FrameObservation) -> Void)?
   private let dependencies: Dependencies
   private let overlayTIndex: Int
   private let apexDetector = ServeTossApexDetector()
@@ -139,6 +141,15 @@ final class BallDetectionManager: ObservableObject {
     state.lock.lock()
     defer { state.lock.unlock() }
     return apexDetector.diagnostics
+  }
+
+  // Change while ingress is stopped; camera/video then reopen a fresh generation.
+  func setPoseOnly(_ enabled: Bool) {
+    state.lock.lock()
+    defer { state.lock.unlock() }
+    guard state.poseOnly != enabled else { return }
+    state.poseOnly = enabled
+    resetTrackingState()
   }
 
   convenience init(poseDetectionManager: PoseDetectionManager?, overlayTIndex: Int = 2,
@@ -195,6 +206,7 @@ final class BallDetectionManager: ObservableObject {
     let owned = Lease(identity: FrameIdentity(sourceID: input.sourceID,
       generation: state.generation, sequence: state.sequence, sourceTime: input.sourceTime))
     state.reserve(owned)
+    let poseOnly = state.poseOnly
     State.increment(&state.diagnostics.admitted)
     state.lock.unlock()
 
@@ -212,17 +224,23 @@ final class BallDetectionManager: ObservableObject {
         let extracted = dependencies.extractPose(input, owned.identity)
         // A mismatched pose is missing, never a substitute for this frame.
         pose = AnalysisFrame.Metadata.associatedPose(extracted, identity: owned.identity)
-        result = try? dependencies.analyze(input, owned.identity, pose)
+        if !poseOnly { result = try? dependencies.analyze(input, owned.identity, pose) }
       }
       if state.takeReset() { dependencies.reset() }
       state.markPublication()
       // Capture value results only: this closure does not retain Input/pixels/tensors.
       let completedPose = pose
       let completedResult = result
+      let rawSize = CGSize(width: CVPixelBufferGetWidth(input.pixelBuffer),
+                           height: CVPixelBufferGetHeight(input.pixelBuffer))
+      let rotates = [.left, .leftMirrored, .right, .rightMirrored].contains(input.orientation)
+      let observation = PoseDetectionManager.FrameObservation(pose: pose,
+        orientedSize: rotates ? CGSize(width: rawSize.height, height: rawSize.width) : rawSize,
+        ingressTime: input.ingressTime)
       dependencies.publication { [weak self, state] in
         defer { state.release(owned) }
         guard let self else { return }
-        self.publish(completedResult, pose: completedPose, lease: owned)
+        self.publish(completedResult, pose: completedPose, observation: observation, lease: owned)
       }
     }
     return true
@@ -234,7 +252,8 @@ final class BallDetectionManager: ObservableObject {
     return state.generation
   }
 
-  private func publish(_ result: Analysis?, pose: PoseDetectionManager.FramePose, lease: Lease) {
+  private func publish(_ result: Analysis?, pose: PoseDetectionManager.FramePose,
+                       observation: PoseDetectionManager.FrameObservation, lease: Lease) {
     // Serializes reset against the short effect batch, never against Vision/model work.
     // Recursive locking permits a UI/callback subscriber to invalidate synchronously.
     state.lock.lock()
@@ -244,6 +263,8 @@ final class BallDetectionManager: ObservableObject {
     guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
     apexDetector.reset(sourceID: lease.identity.sourceID, generation: lease.identity.generation)
     dependencies.publishPose(pose)
+    guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
+    onPoseFrame?(observation)
     guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }
     ballPosition = result?.samples?.first { $0.tIndex == overlayTIndex }?.position ?? result?.position
     guard state.isCurrent(lease.identity) else { clearPublishedValues(); return }

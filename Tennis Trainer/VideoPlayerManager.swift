@@ -149,7 +149,7 @@ final class VideoPlayerManager: ObservableObject {
         }
     }
 
-    private var sourceID = UUID()
+    @Published private(set) var sourceID = UUID()
     @Published var isPlaying = false
     @Published var currentTime: Double = 0
     @Published var duration: Double = 0
@@ -440,6 +440,46 @@ final class VideoPlayerManager: ObservableObject {
     }
     
     private func getVideoOrientation() -> CGImagePropertyOrientation { orientation }
+
+    enum CalibrationError: LocalizedError {
+      case notPaused, changed
+      var errorDescription: String? {
+        switch self {
+        case .notPaused: return "Pause on a clear reference frame first."
+        case .changed: return "Playback changed while reading the frame. Pause and try again."
+        }
+      }
+    }
+
+    @MainActor
+    func captureCalibrationPose(analyze: @escaping (CGImage, BallDetectionManager.FrameIdentity) throws
+      -> PoseDetectionManager.FrameObservation = PoseDetectionManager.calibrationObservation(in:identity:))
+      async throws -> PoseDetectionManager.FrameObservation {
+      guard contextActive, playbackState == .paused, !isLoading, seekID == nil,
+            let handle = media?.lease(), let position = finitePosition() else {
+        throw CalibrationError.notPaused
+      }
+      let source = sourceID, load = loadID, run = frameRun
+      // Retain the imported file until both image generation and Vision have finished.
+      defer { withExtendedLifetime(handle) {} }
+      let generator = AVAssetImageGenerator(asset: AVURLAsset(url: handle.url))
+      generator.appliesPreferredTrackTransform = true
+      generator.maximumSize = CGSize(width: 1280, height: 1280)
+      generator.requestedTimeToleranceBefore = .zero
+      generator.requestedTimeToleranceAfter = .zero
+      let result = try await generator.image(at: CMTime(seconds: position, preferredTimescale: 600))
+      let identity = BallDetectionManager.FrameIdentity(sourceID: source, generation: run,
+        sequence: 1, sourceTime: result.actualTime)
+      let observation = try await Task.detached(priority: .userInitiated) {
+        try analyze(result.image, identity)
+      }.value
+      try Task.checkCancellation()
+      guard source == sourceID, load == loadID, run == frameRun, contextActive,
+            playbackState == .paused, !isLoading, seekID == nil else {
+        throw CalibrationError.changed
+      }
+      return observation
+    }
 
     private static func orientation(for transform: CGAffineTransform) -> CGImagePropertyOrientation {
       if transform.a == 0 && transform.b == 1 && transform.c == -1 && transform.d == 0 { return .right }

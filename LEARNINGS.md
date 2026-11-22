@@ -172,3 +172,13 @@
 - Observation: The initial Phase 1 plan conflated invalid frame/window metadata, which rejects analysis, with mismatched per-sample pose, which must become missing and use the existing height fallback under CUE-04.
 - Action: Keep these failure cases separate in implementation and tests. For mismatched pose, test a cue above 0.70 and suppression at/below 0.70 with valid frame metadata, cooldown satisfied, and all other eligibility conditions met.
 - Confidence: high
+
+**2026-11-21 — Backhand prototype scope and calibration**
+- Observation: The user subsequently authorized a functional C3 first version with minimal infrastructure. The implementation uses two reference poses, separate live/clip calibration, and pose-only analysis within the existing admission/generation guard; paused-frame calibration reads an oriented image outside the cue timeline.
+- Action: Iterate from on-court use before expanding to other cues or formal evaluation infrastructure. Keep the checkpoint a projected movement marker, preserve the serve roadmap, and retain the imported-file lease and timeline checks around asynchronous calibration reads.
+- Confidence: high
+
+**2026-11-21 — Simulator body-pose model availability**
+- Observation: On this host, the iOS 26.5 simulator's real paused-frame Vision request failed with `Missing weights path cnn_human_pose.espresso.weights`. Image extraction worked; the same integration check passed with injected pose extraction, and the detector/pipeline and UI-control tests passed.
+- Action: Keep simulator frame/timeline checks independent of Vision model availability. Verify actual arm tracking and event-to-ear timing on an iPhone; do not count synthetic observations or the UI smoke test as camera accuracy evidence.
+- Confidence: high

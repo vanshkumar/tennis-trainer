@@ -15,6 +15,7 @@ Top-level map of the app as it exists today. This file is intentionally short: i
 
 The repository is now aligned around the serve-training product:
 - `ServeTossApexDetector` drives the beep from the GridTrackNet sample stream.
+- The opt-in Backhand drill uses `BackhandCueManager` for a calibrated, projected hand-travel/top-arm-extension marker. It does not detect impact or grade a stroke.
 - The older forehand heuristic is parked under `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` for future revival.
 
 ## Code Layout
@@ -41,6 +42,8 @@ The repository is now aligned around the serve-training product:
   Simpler fallback detector based on color thresholding + Kalman smoothing.
 - `Tennis Trainer/AudioManager.swift`
   Generates and plays the app beep.
+- `Tennis Trainer/BackhandCueManager.swift` and `BackhandCueView.swift`
+  Own two-pose calibration, the C3 movement state machine, and its setup/status diagram. Live and playback have separate managers and in-memory references.
 - `Tennis TrainerTests/`
   Unit test target.
 - `Tennis TrainerUITests/`
@@ -77,6 +80,15 @@ The repository is now aligned around the serve-training product:
 - Ended stops processing. Replay seeks to zero through the completion gate and starts a fresh analysis window and cue cooldown. A weak display-link target and explicit retirement keep one intended extraction loop.
 - These implemented control contracts have deterministic and UI regression coverage. Physical permission, capture, local-media inspection and audio timing remain separate acceptance evidence.
 
+### Backhand Prototype
+
+- Selecting Backhand stops ingress, selects pose-only analysis inside the existing bounded `BallDetectionManager`, and resumes the selected source if it was running. Serve retains its existing ball/apex path.
+- Guarded per-frame observations include pose identity, oriented dimensions and ingress time. The backhand manager uses equal-scale, shoulder-relative coordinates and a fixed reference arm scale, not the existing normalized segment headings.
+- Ready and checkpoint references define forward direction, travel and top-arm extension. The detector requires ready, backward hand travel, forward travel and a confirmed checkpoint, then rearms at ready. Missing/late pose, gaps and lifecycle changes retire attempts.
+- Live setup captures the latest fresh pose after a countdown. Paused-video setup independently extracts an oriented image at the selected time, holds its media lease through Vision, and rejects results after timeline/source changes. It never enters the automatic cue stream.
+- Setup is retained across Stop/Pause/Replay; a new clip or changed image aspect clears it. Physical camera movement requires Recalibrate. The arm diagram is separate from the unfinished preview overlay geometry.
+- Sound-off trials still count markers. Stop/Pause/seek/drill changes cancel pending node buffers; sound already buffered by an output route may finish. Physical event-to-ear latency and stroke accuracy are unmeasured.
+
 ## Detection Boundaries
 
 ### Orientation
@@ -91,7 +103,7 @@ The repository is now aligned around the serve-training product:
 ### Pose
 
 - Implemented with `VNDetectHumanBodyPoseRequest`.
-- Current tracked joints cover the right arm plus `nose`/`neck` for the toss height gate.
+- Current tracked joints cover both shoulders, elbows and wrists, plus `nose`/`neck` for the toss height gate.
 - The shared Vision request is serialized. Extraction returns a frame-tagged value; missing or invalid pose is explicit.
 - `detectedPose` is presentation state for overlays. Cue eligibility uses the candidate frame's own pose metadata, not the latest overlay pose. Missing or mismatched pose uses the existing strict height fallback.
 

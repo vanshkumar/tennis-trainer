@@ -171,6 +171,15 @@ final class VideoPlayerManagerTests: XCTestCase {
     await fulfillment(of: [sought], timeout: 5)
     observation = nil
     XCTAssertEqual(manager!.currentTime, 0.5, accuracy: 0.05)
+    // Exercise real paused-frame extraction without requiring simulator Vision weights.
+    let reference = try await manager!.captureCalibrationPose { image, identity in
+      .init(pose: .init(identity: identity, joints: [:]),
+            orientedSize: CGSize(width: image.width, height: image.height), ingressTime: 0)
+    }
+    XCTAssertEqual(reference.pose.identity.sourceID, manager!.sourceID)
+    XCTAssertEqual(CMTimeGetSeconds(reference.pose.identity.sourceTime), 0.5, accuracy: 1.0 / 30)
+    XCTAssertEqual(reference.orientedSize, CGSize(width: 64, height: 64))
+    XCTAssertEqual(manager!.playbackState, .paused, "Reading a reference must not start playback")
     let ended = expectation(description: "real end notification")
     observation = manager!.$playbackState.filter { $0 == .ended }.prefix(1).sink { _ in ended.fulfill() }
     manager!.play()

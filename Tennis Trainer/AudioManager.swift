@@ -73,6 +73,11 @@ class AudioManager: ObservableObject {
             playerNode.play()
         }
     }
+
+    func cancelPendingBeeps() {
+        // Drops player-node buffers. Audio already handed to a route may still finish.
+        playerNode?.stop()
+    }
     
     deinit {
         audioEngine?.stop()

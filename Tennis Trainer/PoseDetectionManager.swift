@@ -1,6 +1,7 @@
 import Foundation
 import Vision
 import AVFoundation
+import QuartzCore
 
 final class PoseDetectionManager: ObservableObject {
   struct Joint {
@@ -16,6 +17,12 @@ final class PoseDetectionManager: ObservableObject {
       if let neck = joints[.neck], neck.confidence > 0.3 { return neck.location.y }
       return nil
     }
+  }
+
+  struct FrameObservation {
+    let pose: FramePose
+    let orientedSize: CGSize
+    let ingressTime: CFTimeInterval
   }
 
   typealias Transaction = (CVPixelBuffer, CGImagePropertyOrientation) throws
@@ -38,18 +45,35 @@ final class PoseDetectionManager: ObservableObject {
       let handler = VNImageRequestHandler(cvPixelBuffer: pixels, orientation: orientation, options: [:])
       try handler.perform([request])
       guard let observation = request.results?.first else { return [:] }
-      let names: [VNHumanBodyPoseObservation.JointName] = [
-        .nose, .neck, .leftShoulder, .rightShoulder,
-        .leftElbow, .rightElbow, .leftWrist, .rightWrist
-      ]
-      var joints: [VNHumanBodyPoseObservation.JointName: Joint] = [:]
-      for name in names {
-        if let point = try? observation.recognizedPoint(name) {
-          joints[name] = Joint(location: point.location, confidence: point.confidence)
-        }
-      }
-      return joints
+      return Self.joints(from: observation)
     })
+  }
+
+  private static func joints(from observation: VNHumanBodyPoseObservation)
+    -> [VNHumanBodyPoseObservation.JointName: Joint] {
+    let names: [VNHumanBodyPoseObservation.JointName] = [
+      .nose, .neck, .leftShoulder, .rightShoulder,
+      .leftElbow, .rightElbow, .leftWrist, .rightWrist
+    ]
+    var joints: [VNHumanBodyPoseObservation.JointName: Joint] = [:]
+    for name in names {
+      if let point = try? observation.recognizedPoint(name) {
+        joints[name] = Joint(location: point.location, confidence: point.confidence)
+      }
+    }
+    return joints
+  }
+
+  // Paused-video calibration uses an independently owned, already oriented image.
+  // It never publishes a pose or enters the live cue timeline.
+  static func calibrationObservation(in image: CGImage,
+                                     identity: BallDetectionManager.FrameIdentity) throws -> FrameObservation {
+    let request = VNDetectHumanBodyPoseRequest()
+    request.revision = VNDetectHumanBodyPoseRequestRevision1
+    try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
+    let points = request.results?.count == 1 ? joints(from: request.results![0]) : [:]
+    return FrameObservation(pose: .init(identity: identity, joints: points),
+      orientedSize: CGSize(width: image.width, height: image.height), ingressTime: CACurrentMediaTime())
   }
 
   func extractPose(in pixels: CVPixelBuffer, orientation: CGImagePropertyOrientation,

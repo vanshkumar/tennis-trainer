@@ -14,12 +14,23 @@ Why it's useful:
 - On-device processing for privacy and low latency.
 
 What's next:
-- **Trophy position** cue (peak of the load before you uncoil into the ball).
-- More serve cues, then expand to other strokes.
+- Complete the existing toss-apex reliability roadmap and physical-device checks.
+- Try the opt-in backhand prototype below; its coaching value and audible timing are still unvalidated.
+
+## Try the backhand prototype
+
+Select **Backhand** for an experimental **Drive through** movement cue. It works with the live camera and saved videos, using both arms without ball inference.
+
+1. Use one right-handed player and a fixed side-oblique view that shows both shoulders, elbows and hands. Keep the hands together on the racket.
+2. In live mode, start capture and tap **Set ready**. You have five seconds to stand in your ready position. Then use **Set checkpoint** to capture a comfortable position just through your swing; the top arm may stay bent. In video mode, pause on each reference frame instead; the small time-step buttons help select it.
+3. Return to ready, take the hands back and swing through. A beep means the hands reached the reference corridor with similar top-arm extension. The diagram shows both arms and the selected checkpoint; the cue count also updates with sound off.
+4. Compare controlled feeds with **Sound** on and off. Use **Recalibrate** if the camera position, player or intended shot changes. Setup stays in memory for the current camera setup or clip; a new clip needs new calibration.
+
+This first version detects a projected movement, **not impact or shot quality**. A shadow swing can trigger it. Missing arms or large analysis gaps reset the attempt. Phone/audio-route latency and on-court accuracy still need real-device trials. The original serve-reliability milestone remains open.
 
 Current scope:
-- Solo serve practice. Right-handed only for now.
+- Solo serve practice and the experimental backhand drill. Right-handed only for now.
 - Portrait orientation only for now, so the full toss is easier to keep in frame.
 - Recommended camera placement: side-on, toss-arm side. Behind-the-player still works for the toss apex but won't carry forward to richer cues.
 
-Status: work in progress. The active beep cue in the codebase is the serve toss apex described above; see `PRD.MD` for the current behavior and `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` for the parked forehand heuristic.
+Status: work in progress. Serve toss apex is the default cue; Backhand is an opt-in prototype. See `PRD.MD` for the serve specification and `Tennis Trainer/Archived/Forehand/FOREHAND_ARCHIVE.md` for the parked forehand heuristic.

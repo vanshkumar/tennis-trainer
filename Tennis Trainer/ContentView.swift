@@ -13,12 +13,20 @@ enum AppMode: String, CaseIterable {
     case videoPlayback = "Video Playback"
 }
 
+enum PracticeDrill: String, CaseIterable {
+    case serve = "Serve"
+    case backhand = "Backhand"
+}
+
 struct ContentView: View {
     @StateObject private var cameraManager = AppRuntime.makeCameraManager()
     @StateObject private var audioManager = AudioManager()
     @StateObject private var cameraPoseManager = PoseDetectionManager()
     @StateObject private var playbackPoseManager = PoseDetectionManager()
     @StateObject private var videoPlayerManager = AppRuntime.makeVideoPlayerManager()
+    @StateObject private var cameraBackhand = BackhandCueManager()
+    @StateObject private var playbackBackhand = BackhandCueManager()
+    @State private var currentDrill: PracticeDrill = .serve
     @Environment(\.scenePhase) private var scenePhase
     @State private var frameCount = 0
     @State private var lastFrameTime = Date()
@@ -31,6 +39,13 @@ struct ContentView: View {
     
     var body: some View {
         VStack {
+            Picker("Drill", selection: $currentDrill) {
+                ForEach(PracticeDrill.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("practice.drill")
+            .padding(.horizontal)
+            .onChange(of: currentDrill) { _, _ in handleDrillChange() }
             // Mode picker at the top
             Picker("Mode", selection: $currentMode) {
                 ForEach(AppMode.allCases, id: \.self) { mode in
@@ -45,12 +60,29 @@ struct ContentView: View {
             }
             
             // Content based on current mode
-            ZStack {
-                switch currentMode {
-                case .liveCamera:
-                    liveCameraView
-                case .videoPlayback:
-                    videoPlaybackView
+            if currentDrill == .backhand {
+                ScrollView {
+                    VStack(spacing: 12) {
+                        if currentMode == .liveCamera {
+                            liveCameraView.frame(height: 340).clipped()
+                        } else {
+                            videoPlaybackView
+                        }
+                        BackhandCueView(manager: currentMode == .liveCamera ? cameraBackhand : playbackBackhand,
+                            isLive: currentMode == .liveCamera,
+                            isRunning: currentMode == .liveCamera ? cameraManager.isRecording : videoPlayerManager.isPlaying,
+                            canCaptureVideo: videoPlayerManager.playbackState == .paused && !videoPlayerManager.isLoading,
+                            readVideoPose: { try await videoPlayerManager.captureCalibrationPose() },
+                            cancelAudio: { audioManager.cancelPendingBeeps() })
+                            .id(currentMode == .liveCamera ? "camera" : videoPlayerManager.sourceID.uuidString)
+                    }
+                }
+            } else {
+                ZStack {
+                    switch currentMode {
+                    case .liveCamera: liveCameraView
+                    case .videoPlayback: videoPlaybackView
+                    }
                 }
             }
         }
@@ -59,6 +91,28 @@ struct ContentView: View {
             cameraManager.setupBallDetection(with: cameraPoseManager, factory: AppRuntime.overlayFactory)
             videoPlayerManager.poseDetectionManager = playbackPoseManager
             videoPlayerManager.setupBallDetection(with: playbackPoseManager, factory: AppRuntime.overlayFactory)
+            cameraManager.ballDetectionManager?.setPoseOnly(currentDrill == .backhand)
+            videoPlayerManager.ballDetectionManager?.setPoseOnly(currentDrill == .backhand)
+            cameraManager.ballDetectionManager?.onPoseFrame = { observation in
+                guard currentDrill == .backhand, currentMode == .liveCamera,
+                      cameraManager.isRecording, scenePhase == .active else { return }
+                cameraBackhand.consume(observation)
+            }
+            videoPlayerManager.ballDetectionManager?.onPoseFrame = { observation in
+                guard currentDrill == .backhand, currentMode == .videoPlayback,
+                      videoPlayerManager.isPlaying, scenePhase == .active else { return }
+                playbackBackhand.consume(observation)
+            }
+            cameraBackhand.onCue = {
+                guard currentDrill == .backhand, currentMode == .liveCamera,
+                      cameraManager.isRecording, scenePhase == .active else { return }
+                audioManager.playBeep()
+            }
+            playbackBackhand.onCue = {
+                guard currentDrill == .backhand, currentMode == .videoPlayback,
+                      videoPlayerManager.isPlaying, scenePhase == .active else { return }
+                audioManager.playBeep()
+            }
             updateActiveContexts()
             
             cameraManager.onFrameProcessed = {
@@ -88,22 +142,34 @@ struct ContentView: View {
             }
 
             cameraManager.onApex = {
-                guard currentMode == .liveCamera, scenePhase == .active else { return }
+                guard currentDrill == .serve, currentMode == .liveCamera, scenePhase == .active else { return }
                 audioManager.playBeep()
             }
             videoPlayerManager.onApex = {
-                guard currentMode == .videoPlayback, scenePhase == .active else { return }
+                guard currentDrill == .serve, currentMode == .videoPlayback, scenePhase == .active else { return }
                 audioManager.playBeep()
             }
         }
         .onChange(of: scenePhase) { _, _ in updateActiveContexts() }
         .onChange(of: cameraManager.isRecording) { _, active in
             if active { AppRuntime.seedOverlay(cameraManager.ballDetectionManager, pose: cameraPoseManager) }
+            else {
+                cameraBackhand.resetAttempt()
+                if currentMode == .liveCamera { audioManager.cancelPendingBeeps() }
+            }
         }
         .onChange(of: videoPlayerManager.isPlaying) { _, active in
             if active { AppRuntime.seedOverlay(videoPlayerManager.ballDetectionManager, pose: playbackPoseManager) }
         }
+        .onChange(of: videoPlayerManager.playbackState) { _, state in
+            if state != .playing {
+                playbackBackhand.resetAttempt()
+                if currentMode == .videoPlayback { audioManager.cancelPendingBeeps() }
+            }
+        }
+        .onChange(of: videoPlayerManager.sourceID) { _, _ in playbackBackhand.clearCalibration() }
         .onDisappear {
+            audioManager.cancelPendingBeeps()
             cameraManager.setContextActive(false)
             videoImporter.cancel()
             videoPlayerManager.shutdown()
@@ -143,9 +209,9 @@ struct ContentView: View {
                     
                     // Right arm joint overlays
                     GeometryReader { geometry in
-                        let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = [
+                        let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = currentDrill == .serve ? [
                             .rightShoulder, .rightElbow, .rightWrist
-                        ]
+                        ] : []
                         
                         if rightArmJoints.contains(where: { cameraPoseManager.detectedPose[$0] != nil }) {
                           ZStack {
@@ -168,7 +234,7 @@ struct ContentView: View {
                         }
 
                         // Ball overlay (live camera)
-                        if let manager = cameraManager.ballDetectionManager {
+                        if currentDrill == .serve, let manager = cameraManager.ballDetectionManager {
                             BallOverlayView(manager: manager, size: geometry.size)
                         }
                     }
@@ -282,9 +348,9 @@ struct ContentView: View {
                         
                         // Right arm joint overlays for video
                         GeometryReader { geometry in
-                            let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = [
+                            let rightArmJoints: [VNHumanBodyPoseObservation.JointName] = currentDrill == .serve ? [
                                 .rightShoulder, .rightElbow, .rightWrist
-                            ]
+                            ] : []
                             
                             if rightArmJoints.contains(where: { playbackPoseManager.detectedPose[$0] != nil }) {
                               ZStack {
@@ -307,7 +373,7 @@ struct ContentView: View {
                             }
 
                             // Ball overlay (video)
-                            if let manager = videoPlayerManager.ballDetectionManager {
+                            if currentDrill == .serve, let manager = videoPlayerManager.ballDetectionManager {
                                 BallOverlayView(manager: manager, size: geometry.size)
                             }
                         }
@@ -368,6 +434,14 @@ struct ContentView: View {
                         }
                         
                         // Play/pause and other controls
+                        if currentDrill == .backhand {
+                            HStack(spacing: 20) {
+                                Button("−0.03s") { videoPlayerManager.seek(to: videoPlayerManager.currentTime - 1.0 / 30) }
+                                Text("\(videoPlayerManager.currentTime, specifier: "%.2f")s").monospacedDigit()
+                                Button("+0.03s") { videoPlayerManager.seek(to: videoPlayerManager.currentTime + 1.0 / 30) }
+                            }
+                            .disabled(videoPlayerManager.playbackState != .paused || videoPlayerManager.isLoading)
+                        }
                         HStack(spacing: 20) {
                             Button(videoPlayerManager.playbackState == .ended ? "Replay" :
                                    (videoPlayerManager.playRequested ? "Pause" : "Play")) {
@@ -447,6 +521,9 @@ struct ContentView: View {
     }
 
     private func handleModeChange(to newMode: AppMode) {
+        audioManager.cancelPendingBeeps()
+        cameraBackhand.resetAttempt()
+        playbackBackhand.resetAttempt()
         // Always retire the outgoing owner, including pending or already paused work.
         updateActiveContexts()
         frameCount = 0
@@ -466,9 +543,28 @@ struct ContentView: View {
     }
 
     private func updateActiveContexts() {
+        if scenePhase != .active {
+            audioManager.cancelPendingBeeps()
+            cameraBackhand.resetAttempt()
+            playbackBackhand.resetAttempt()
+        }
         if scenePhase != .active || currentMode != .videoPlayback { videoImporter.cancel() }
         cameraManager.setContextActive(scenePhase == .active && currentMode == .liveCamera)
         videoPlayerManager.setContextActive(scenePhase == .active && currentMode == .videoPlayback)
+    }
+
+    private func handleDrillChange() {
+        let restartCamera = cameraManager.captureRequested
+        let restartVideo = videoPlayerManager.isPlaying
+        cameraManager.stopCapture()
+        videoPlayerManager.pause()
+        audioManager.cancelPendingBeeps()
+        cameraBackhand.resetAttempt()
+        playbackBackhand.resetAttempt()
+        cameraManager.ballDetectionManager?.setPoseOnly(currentDrill == .backhand)
+        videoPlayerManager.ballDetectionManager?.setPoseOnly(currentDrill == .backhand)
+        if restartCamera, currentMode == .liveCamera, scenePhase == .active { cameraManager.startCapture() }
+        if restartVideo, currentMode == .videoPlayback, scenePhase == .active { videoPlayerManager.play() }
     }
     
     private func formatTime(_ seconds: Double) -> String {
