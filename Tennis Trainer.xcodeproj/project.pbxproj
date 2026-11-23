@@ -403,6 +403,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to capture high-speed video for tennis training analysis and provide real-time feedback on racket positioning.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app uses audio to provide feedback sounds during tennis training.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -433,6 +434,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleIconName = AppIcon;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSCameraUsageDescription = "This app uses the camera to capture high-speed video for tennis training analysis and provide real-time feedback on racket positioning.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "This app uses audio to provide feedback sounds during tennis training.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

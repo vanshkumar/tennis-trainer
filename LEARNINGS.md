@@ -184,6 +184,11 @@
 - Confidence: high
 
 **2026-11-23 — Verified TestFlight workflow configuration**
-- Observation: App Store Connect's enabled `Default` workflow watches all file changes on `main`, archives the `Tennis Trainer` scheme for App Store Connect, and distributes to the internal `Testers` group. GitHub recorded the prototype push, but Xcode Cloud produced no build status. Its GitHub installation retained access to this repository; the workflow editor listed `main` while the manual build picker was empty. A manual `main` start condition was added during recovery.
+- Observation: App Store Connect's enabled `Default` workflow watches all file changes on `main`, archives the `Tennis Trainer` scheme for App Store Connect, and distributes to the internal `Testers` group. GitHub recorded the prototype push, but Xcode Cloud produced no build status. Its GitHub installation retained repository access. After re-saving the workflow, adding a manual `main` fallback, and pushing a real documentation change, build 9 started with `Code push` and successfully archived/uploaded. The original missed trigger's cause remains unconfirmed.
 - Action: Check the cloud build for the exact pushed commit before reporting TestFlight delivery. If no build starts, inspect both start conditions and repository lookup; an enabled workflow and installed GitHub app alone do not establish that the trigger is working.
+- Confidence: high
+
+**2026-11-23 — Automated TestFlight encryption metadata**
+- Observation: Cloud build 9 uploaded successfully but remained at `Missing Compliance`, blocking its TestFlight post-action. The app target uses Apple frameworks, has no third-party package/framework dependencies or app-provided encryption, and omitted `ITSAppUsesNonExemptEncryption` from its generated Info.plist.
+- Action: Keep `INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO` in both app configurations and verify the generated Release plist contains Boolean false. Reassess the declaration when adding encryption or third-party libraries; otherwise each upload can require the same manual questionnaire.
 - Confidence: high
