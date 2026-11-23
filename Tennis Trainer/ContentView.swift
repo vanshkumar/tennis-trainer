@@ -36,6 +36,7 @@ struct ContentView: View {
     @StateObject private var videoImporter = VideoImportManager()
     @State private var importRequest = UUID()
     @State private var showingVideoPicker = false
+    @State private var showingBackhandGuide = false
     
     var body: some View {
         VStack {
@@ -61,6 +62,27 @@ struct ContentView: View {
             
             // Content based on current mode
             if currentDrill == .backhand {
+                Button {
+                    cameraManager.stopCapture()
+                    videoPlayerManager.pause()
+                    audioManager.cancelPendingBeeps()
+                    showingBackhandGuide = true
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "book.closed").font(.title2)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Visual setup guide").font(.subheadline.bold())
+                            Text("Camera · two poses · first trial").font(.caption)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.bold())
+                    }
+                    .padding(12)
+                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                }
+                .padding(.horizontal)
+                .accessibilityIdentifier("backhand.guide")
+                .accessibilityHint("Pauses practice and opens illustrated setup instructions")
                 ScrollView {
                     VStack(spacing: 12) {
                         if currentMode == .liveCamera {
@@ -173,6 +195,9 @@ struct ContentView: View {
             cameraManager.setContextActive(false)
             videoImporter.cancel()
             videoPlayerManager.shutdown()
+        }
+        .sheet(isPresented: $showingBackhandGuide) {
+            BackhandGuideView(isLive: currentMode == .liveCamera)
         }
         .sheet(isPresented: $showingVideoPicker, onDismiss: {
             videoImporter.pickerDismissed(request: importRequest)

@@ -9,6 +9,45 @@ import XCTest
 
 final class Tennis_TrainerUITests: XCTestCase {
     @MainActor
+    func testBackhandVisualGuideForLiveAndVideo() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--practice-ui-scenario", "playback-overlay"]
+        app.launch()
+        app.buttons["Backhand"].tap()
+        app.buttons["camera.captureAction"].tap()
+        let guide = app.buttons["backhand.guide"]
+        XCTAssertTrue(guide.waitForExistence(timeout: 5))
+        guide.tap()
+        XCTAssertTrue(app.staticTexts["LIVE CAMERA · QUICK START"].waitForExistence(timeout: 5))
+        let headings = ["Give the camera a clear view", "Save two poses from your swing",
+                        "Ready → back → through", "Keep the ball target the same"]
+        for (index, heading) in headings.enumerated() {
+            XCTAssertTrue(app.staticTexts[heading].exists)
+            XCTAssertTrue(app.staticTexts[heading].isHittable)
+            let screenshot = XCTAttachment(screenshot: app.screenshot())
+            screenshot.name = "Backhand guide step \(index + 1)"
+            screenshot.lifetime = .keepAlways
+            add(screenshot)
+            if index == 0 { app.scrollViews.firstMatch.swipeUp() }
+            app.buttons["backhand.guide.next"].tap()
+        }
+        XCTAssertTrue(guide.waitForExistence(timeout: 5))
+        XCTAssertEqual(app.buttons["camera.captureAction"].label, "Start")
+        app.buttons["Video Playback"].tap()
+        app.buttons["playback.action"].tap()
+        guide.tap()
+        XCTAssertTrue(app.staticTexts["SAVED VIDEO · QUICK START"].waitForExistence(timeout: 5))
+        app.buttons["backhand.guide.step.1"].tap()
+        XCTAssertTrue(app.staticTexts["Save each paused frame"].exists)
+        let video = XCTAttachment(screenshot: app.screenshot())
+        video.name = "Backhand guide video calibration"; video.lifetime = .keepAlways; add(video)
+        app.buttons["backhand.guide.close"].tap()
+        XCTAssertEqual(app.staticTexts["playback.status"].label, "Paused")
+        app.buttons["Serve"].tap()
+        XCTAssertFalse(guide.exists)
+    }
+
+    @MainActor
     func testBackhandSetupAndDrillSwitchControls() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--practice-ui-scenario", "playback-overlay"]

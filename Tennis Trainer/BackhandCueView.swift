@@ -41,16 +41,9 @@ struct BackhandCueView: View {
         ProgressView("Reading this frame…")
       }
 
-      HStack {
-        Button(manager.readyReference == nil ? "1. Set ready" : "1. Ready saved ✓") {
-          capture(.ready)
-        }
-        .accessibilityIdentifier("backhand.ready")
-        Button(manager.calibration == nil ? "2. Set checkpoint" : "2. Checkpoint saved ✓") {
-          capture(.checkpoint)
-        }
-        .disabled(manager.readyReference == nil)
-        .accessibilityIdentifier("backhand.checkpoint")
+      HStack(alignment: .top, spacing: 12) {
+        calibrationControl(.ready)
+        calibrationControl(.checkpoint)
       }
       .buttonStyle(.bordered)
       .font(.subheadline)
@@ -60,7 +53,7 @@ struct BackhandCueView: View {
                           calibration: manager.calibration)
         .frame(height: 100)
         .background(.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 10))
-      Text("Blue: top arm · orange: bottom arm · purple: your checkpoint")
+      Text("Blue: left / top arm · orange: right / bottom arm · purple: saved checkpoint")
         .font(.caption2).foregroundStyle(.secondary)
 
       if let message = manager.message {
@@ -68,12 +61,10 @@ struct BackhandCueView: View {
       }
       Text("The beep marks your movement checkpoint, not a good hit. Compare a few feeds with Sound off.")
         .font(.caption).foregroundStyle(.secondary)
-      DisclosureGroup("Setup help") {
-        Text(isLive
-          ? "Start the camera. Use a fixed side-oblique view with one player and both arms visible. Each setup button gives you 5 seconds to pose."
-          : "Pause on your ready position and set it. Then pause just through the strike to set your checkpoint. Rewind and play from ready to test.")
-          .font(.caption).foregroundStyle(.secondary)
-      }.font(.subheadline)
+      Text(isLive
+        ? "Start the camera, then tap each setup button. You have 5 seconds to get into the illustrated pose."
+        : "Pause at each pose, then tap its setup button. Use ±0.03s to choose the frame. Rewind before ready to test.")
+        .font(.caption).foregroundStyle(.secondary)
       if manager.readyReference != nil || captureTask != nil {
         Button("Recalibrate") {
           cancelCapture()
@@ -90,6 +81,22 @@ struct BackhandCueView: View {
     .onChange(of: isRunning) { _, _ in cancelCapture() }
     .onChange(of: canCaptureVideo) { _, _ in if !isLive { cancelCapture() } }
     .onDisappear { cancelCapture() }
+  }
+
+  private func calibrationControl(_ reference: BackhandCueManager.Reference) -> some View {
+    let isReady = reference == .ready
+    let saved = isReady ? manager.readyReference != nil : manager.calibration != nil
+    return VStack(spacing: 5) {
+      BackhandPoseIllustration(phase: isReady ? .ready : .checkpoint).frame(height: 90)
+      Text(isReady ? "Before the backswing" : "Through the swing")
+        .font(.caption2).foregroundStyle(.secondary)
+      Button(saved ? (isReady ? "1. Ready saved ✓" : "2. Checkpoint saved ✓")
+                   : (isReady ? "1. Set ready" : "2. Set checkpoint")) {
+        capture(reference)
+      }
+      .disabled(!isReady && manager.readyReference == nil)
+      .accessibilityIdentifier(isReady ? "backhand.ready" : "backhand.checkpoint")
+    }.frame(maxWidth: .infinity)
   }
 
   private func capture(_ reference: BackhandCueManager.Reference) {

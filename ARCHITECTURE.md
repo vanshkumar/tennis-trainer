@@ -44,6 +44,8 @@ The repository is now aligned around the serve-training product:
   Generates and plays the app beep.
 - `Tennis Trainer/BackhandCueManager.swift` and `BackhandCueView.swift`
   Own two-pose calibration, the C3 movement state machine, and its setup/status diagram. Live and playback have separate managers and in-memory references.
+- `Tennis Trainer/BackhandGuideView.swift` and `BackhandPoseIllustration.swift`
+  Provide the visual quick start for camera placement, reference poses, swing order and sound-off comparison trials. The guide adapts to live/video mode; opening it stops capture and pauses playback until explicit Start/Play.
 - `Tennis TrainerTests/`
   Unit test target.
 - `Tennis TrainerUITests/`
