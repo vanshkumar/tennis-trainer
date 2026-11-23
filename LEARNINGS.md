@@ -182,3 +182,8 @@
 - Observation: On this host, the iOS 26.5 simulator's real paused-frame Vision request failed with `Missing weights path cnn_human_pose.espresso.weights`. Image extraction worked; the same integration check passed with injected pose extraction, and the detector/pipeline and UI-control tests passed.
 - Action: Keep simulator frame/timeline checks independent of Vision model availability. Verify actual arm tracking and event-to-ear timing on an iPhone; do not count synthetic observations or the UI smoke test as camera accuracy evidence.
 - Confidence: high
+
+**2026-11-23 — Verified TestFlight workflow configuration**
+- Observation: App Store Connect's enabled `Default` workflow watches all file changes on `main`, archives the `Tennis Trainer` scheme for App Store Connect, and distributes to the internal `Testers` group. GitHub recorded the prototype push, but Xcode Cloud produced no build status. Its GitHub installation retained access to this repository; the workflow editor listed `main` while the manual build picker was empty. A manual `main` start condition was added during recovery.
+- Action: Check the cloud build for the exact pushed commit before reporting TestFlight delivery. If no build starts, inspect both start conditions and repository lookup; an enabled workflow and installed GitHub app alone do not establish that the trigger is working.
+- Confidence: high
